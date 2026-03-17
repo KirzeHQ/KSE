@@ -320,6 +320,11 @@ async fn submit_data(
                         return HttpResponse::InternalServerError()
                             .json(serde_json::json!({"error": e.to_string()}));
                     }
+
+                    if s3_bucket.is_some() {
+                        let _ = fs::remove_file(&local_path_s);
+                    }
+
                     HttpResponse::Ok().json(serde_json::json!({"saved": remote_path}))
                 }
                 Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": e})),
