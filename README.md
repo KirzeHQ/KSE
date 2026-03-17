@@ -61,3 +61,7 @@ Each project will have its own README with its own instructions. It will also ha
 - Scraper serializes data to `.bin` format and submits it via a PATCH request to the API using its API key and ID.
 - The API stores the latest three scrapes in hot storage and archives older scrapes to cold storage.
 - The frontend queries the API for search results.
+
+## License
+
+This project is licensed under the Apache 2.0. See the LICENSE file for details.
