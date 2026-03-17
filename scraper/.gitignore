@@ -1,0 +1,12 @@
+# dependencies (bun install)
+node_modules
+
+# output
+out
+dist
+*.tgz
+
+# caches
+.eslintcache
+.cache
+*.tsbuildinfo
