@@ -66,7 +66,7 @@ This is the api for the project.
 - **Utils**:
   - `tokio` - async runtime
   - `dotenv` - for managing environment variables
-  - `tracing` - for logging and debugging
+  - `log` - for logging and debugging
 
 - **Ratelimit & Cors**:
   - `tower-http` - for CORS and rate limiting middleware
