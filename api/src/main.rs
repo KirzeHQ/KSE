@@ -6,6 +6,7 @@ use chrono::Utc;
 use dotenvy::dotenv;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use fs2::FileExt;
 use hex::encode as hex_encode;
 use hmac::{Hmac, Mac};
 use rand::{Rng, distributions::Alphanumeric};
@@ -14,16 +15,101 @@ use reqwest::Url;
 use reqwest::header::{CONTENT_TYPE, HOST, HeaderMap, HeaderValue};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sha2::Sha256 as Sha256Inner;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::Builder as TarBuilder;
 use uuid::Uuid;
+
+fn load_api_map(path: &PathBuf) -> std::io::Result<std::collections::HashMap<String, Vec<String>>> {
+    let mut map = std::collections::HashMap::new();
+    if !path.exists() {
+        return Ok(map);
+    }
+    let f = OpenOptions::new().read(true).open(path)?;
+
+    f.lock_shared()?;
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut &f, &mut s)?;
+
+    f.unlock()?;
+
+    for line in s.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(pos) = line.find('=') {
+            let key = line[..pos].to_string();
+            let val = line[pos + 1..].trim();
+            let ids: Vec<String> = if val.is_empty() {
+                Vec::new()
+            } else {
+                val.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            };
+            map.insert(key, ids);
+        }
+    }
+    Ok(map)
+}
+
+fn save_api_map(
+    path: &PathBuf,
+    map: &std::collections::HashMap<String, Vec<String>>,
+) -> std::io::Result<()> {
+    let mut out = String::new();
+    for (k, v) in map.iter() {
+        out.push_str(&format!("{}={}\n", k, v.join(",")));
+    }
+    let f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+
+    f.lock_exclusive()?;
+    std::io::Write::write_all(&mut &f, out.as_bytes())?;
+    f.sync_all()?;
+    f.unlock()?;
+    Ok(())
+}
+
+fn load_id_list(path: &PathBuf) -> std::io::Result<Vec<JsonValue>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let f = OpenOptions::new().read(true).open(path)?;
+    f.lock_shared()?;
+    let mut s = String::new();
+    std::io::Read::read_to_string(&mut &f, &mut s)?;
+    f.unlock()?;
+    let v: Vec<JsonValue> = serde_json::from_str(&s).unwrap_or_else(|_| Vec::new());
+    Ok(v)
+}
+
+fn save_id_list(path: &PathBuf, list: &Vec<JsonValue>) -> std::io::Result<()> {
+    let s = serde_json::to_string_pretty(list).unwrap_or_else(|_| "[]".into());
+    let f = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(path)?;
+    f.lock_exclusive()?;
+    std::io::Write::write_all(&mut &f, s.as_bytes())?;
+    f.sync_all()?;
+    f.unlock()?;
+    Ok(())
+}
 
 #[derive(Serialize)]
 struct Message {
@@ -239,31 +325,71 @@ async fn register_scraper(
     state: web::Data<AppState>,
     body: web::Json<RegisterRequest>,
 ) -> impl Responder {
-    let id = Uuid::new_v4().to_string();
     let api_key: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(40)
         .map(char::from)
         .collect();
 
-    let mut hasher = Sha256::new();
-    hasher.update(api_key.as_bytes());
-    let api_key_hash = format!("{:x}", hasher.finalize());
+    let data_dir = PathBuf::from("data");
+    let _ = fs::create_dir_all(&data_dir);
+    let ini_path = data_dir.join("api.ini");
 
-    let created_at = Utc::now().timestamp();
-
-    let conn = state.db.lock().unwrap();
-    let res = conn.execute(
-        "INSERT INTO scrapers (id, name, api_key_hash, created_at) VALUES (?1, ?2, ?3, ?4)",
-        params![id, body.name.clone(), api_key_hash, created_at],
-    );
-
-    if let Err(e) = res {
+    let mut map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
+    map.insert(api_key.clone(), Vec::new());
+    if let Err(e) = save_api_map(&ini_path, &map) {
         return HttpResponse::InternalServerError()
             .json(serde_json::json!({"error": e.to_string()}));
     }
 
-    HttpResponse::Ok().json(serde_json::json!({"id": id, "api_key": api_key}))
+    HttpResponse::Ok().json(serde_json::json!({"api_key": api_key}))
+}
+
+async fn scraper_register(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    body: web::Json<RegisterRequest>,
+) -> impl Responder {
+    let auth_hdr = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = auth_hdr.strip_prefix("Bearer ").unwrap_or("");
+    if api_key.is_empty() {
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "Missing API key"}));
+    }
+
+    let data_dir = PathBuf::from("data");
+    let _ = fs::create_dir_all(&data_dir);
+    let ini_path = data_dir.join("api.ini");
+    if !ini_path.exists() {
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "invalid API key"}));
+    }
+
+    let mut map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
+    if !map.contains_key(api_key) {
+        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "invalid API key"}));
+    }
+
+    let new_id = Uuid::new_v4().to_string();
+    let id_list_path = data_dir.join("id-list.json");
+    let mut id_list: Vec<JsonValue> = load_id_list(&id_list_path).unwrap_or_else(|_| Vec::new());
+    let entry = serde_json::json!({"id": new_id, "name": body.name.clone(), "created_at": Utc::now().timestamp()});
+    id_list.push(entry);
+    if let Err(e) = save_id_list(&id_list_path, &id_list) {
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": e.to_string()}));
+    }
+
+    let list = map.entry(api_key.to_string()).or_default();
+    list.push(new_id.clone());
+    if let Err(e) = save_api_map(&ini_path, &map) {
+        return HttpResponse::InternalServerError()
+            .json(serde_json::json!({"error": e.to_string()}));
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"id": new_id}))
 }
 
 async fn submit_data(
@@ -284,36 +410,48 @@ async fn submit_data(
         });
     }
 
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    let token_hash = format!("{:x}", hasher.finalize());
+    let data_dir = PathBuf::from("data");
+    let ini_path = data_dir.join("api.ini");
+    if !ini_path.exists() {
+        return HttpResponse::Unauthorized().json(Message {
+            message: "Invalid API key",
+        });
+    }
+    let map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
+    if !map.contains_key(token) {
+        return HttpResponse::Unauthorized().json(Message {
+            message: "Invalid API key",
+        });
+    }
 
-    let conn = state.db.lock().unwrap();
-    let mut stmt = match conn.prepare("SELECT id FROM scrapers WHERE api_key_hash = ?1") {
-        Ok(s) => s,
-        Err(e) => {
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": e.to_string()}));
-        }
-    };
-
-    let mut rows = match stmt.query(params![token_hash]) {
-        Ok(r) => r,
-        Err(e) => {
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": e.to_string()}));
-        }
-    };
-
-    let scraper_id: Option<String> = match rows.next() {
-        Ok(Some(row)) => row.get::<usize, String>(0).ok(),
-        Ok(None) => None,
-        Err(_) => None,
-    };
+    let q_params: HashMap<String, String> = req
+        .query_string()
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            match (parts.next(), parts.next()) {
+                (Some(k), Some(v)) if !k.is_empty() => Some((k.to_string(), v.to_string())),
+                _ => None,
+            }
+        })
+        .collect();
+    let scraper_id = req
+        .headers()
+        .get("X-Scraper-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| q_params.get("scraper_id").cloned());
 
     if scraper_id.is_none() {
         return HttpResponse::Unauthorized().json(Message {
-            message: "Invalid API key",
+            message: "Missing scraper id",
+        });
+    }
+
+    let assigned_ids = map.get(token).cloned().unwrap_or_default();
+    if !assigned_ids.contains(&scraper_id.as_ref().unwrap().to_string()) {
+        return HttpResponse::Unauthorized().json(Message {
+            message: "Scraper id not assigned to API key",
         });
     }
 
@@ -573,38 +711,13 @@ struct ScraperEntry {
 }
 
 async fn trusted_scrapers(state: web::Data<AppState>) -> impl Responder {
-    let conn = state.db.lock().unwrap();
-    let mut stmt =
-        match conn.prepare("SELECT id, name, created_at FROM scrapers ORDER BY created_at DESC") {
-            Ok(s) => s,
-            Err(e) => {
-                return HttpResponse::InternalServerError()
-                    .json(serde_json::json!({"error": e.to_string()}));
-            }
-        };
-
-    let rows = match stmt.query_map([], |row| {
-        Ok(ScraperEntry {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            created_at: row.get(2)?,
-        })
-    }) {
-        Ok(r) => r,
-        Err(e) => {
-            return HttpResponse::InternalServerError()
-                .json(serde_json::json!({"error": e.to_string()}));
-        }
-    };
-
-    let mut items = Vec::new();
-    for r in rows {
-        if let Ok(s) = r {
-            items.push(s);
-        }
+    let data_dir = PathBuf::from("data");
+    let id_list_path = data_dir.join("id-list.json");
+    if !id_list_path.exists() {
+        return HttpResponse::Ok().json(serde_json::json!({"scrapers": []}));
     }
-
-    HttpResponse::Ok().json(serde_json::json!({"scrapers": items}))
+    let vlist = load_id_list(&id_list_path).unwrap_or_else(|_| Vec::new());
+    HttpResponse::Ok().json(serde_json::json!({"scrapers": vlist}))
 }
 
 fn list_files_recursive(dir: &PathBuf, base: &PathBuf, out: &mut Vec<String>) {
@@ -857,6 +970,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(Cors::permissive())
             .route("/", web::get().to(index))
             .route("/register", web::post().to(register_scraper))
+            .route("/scraper/register", web::post().to(scraper_register))
             .route("/submit", web::patch().to(submit_data))
             .route("/search", web::get().to(search))
             .route("/sources", web::get().to(sources))
