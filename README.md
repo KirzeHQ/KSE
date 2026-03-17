@@ -18,7 +18,7 @@ KSE is a modular, API-first search engine designed to scrape, store, and query d
 - `api/`: Contains the API codebase.
 - `frontend/`: Contains the frontend codebase.
 - `docs/`: Contains documentation and guides for contributors.
-- `storage/`: Contains scripts and configurations for hot and cold storage management.
+- `scripts/`: Contains scripts and configurations.
 - `bots/`: Contains any bots or automation scripts related to the project.
 
 Each project will have its own README with its own instructions. It will also have docker files if you need them. The main README will contain an overview of the project, architecture, and contribution guidelines.
