@@ -12,6 +12,17 @@ KSE is a modular, API-first search engine designed to scrape, store, and query d
 - Ensure scalability and modularity for adding new scrapers and sources.
 - Utilize free or minimal-cost hosting and storage where possible.
 
+## Repo Structure
+
+- `scraper/`: Contains the universal scraper codebase and configuration.
+- `api/`: Contains the API codebase.
+- `frontend/`: Contains the frontend codebase.
+- `docs/`: Contains documentation and guides for contributors.
+- `storage/`: Contains scripts and configurations for hot and cold storage management.
+- `bots/`: Contains any bots or automation scripts related to the project.
+
+Each project will have its own README with its own instructions. It will also have docker files if you need them. The main README will contain an overview of the project, architecture, and contribution guidelines.
+
 ## Architecture
 
 - **Universal Scraper**: A flexible scraper that handles all scraping tasks and identifies itself with a unique scraper ID.
