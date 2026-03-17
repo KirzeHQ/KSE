@@ -2,13 +2,17 @@ use actix_cors::Cors;
 use actix_web::{
     App, HttpRequest, HttpResponse, HttpServer, Responder, http::header, middleware::Logger, web,
 };
-use aws_sdk_s3::Client as S3Client;
-use aws_sdk_s3::primitives::ByteStream;
 use chrono::Utc;
 use dotenvy::dotenv;
+use hex::encode as hex_encode;
+use hmac::{Hmac, Mac};
 use rand::{Rng, distributions::Alphanumeric};
+use reqwest::Client as HttpClient;
+use reqwest::Url;
+use reqwest::header::{CONTENT_TYPE, HOST, HeaderMap, HeaderValue};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256 as Sha256Inner;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
@@ -174,29 +178,128 @@ async fn submit_data(
                     }
                 };
 
-                let mut cfg_loader = aws_config::from_env();
-                if let Some(ep) = s3_endpoint.clone() {
-                    cfg_loader = cfg_loader.endpoint_url(ep);
-                }
-
-                let aws_conf = cfg_loader.load().await;
-                let client = S3Client::new(&aws_conf);
-
                 let key_in_bucket =
                     format!("{}/{}", source, path.file_name().unwrap().to_string_lossy());
+                let endpoint = s3_endpoint.unwrap_or_else(|| {
+                    format!("https://{}/{}", "r2.cloudflarestorage.com", bucket_name)
+                });
 
-                let body = ByteStream::from(data.clone());
-                match client
-                    .put_object()
-                    .bucket(bucket_name)
-                    .key(&key_in_bucket)
-                    .body(body)
-                    .send()
-                    .await
-                {
-                    Ok(_) => {
-                        let remote = format!("s3://{}/{}", s3_bucket.unwrap(), key_in_bucket);
-                        Ok(remote)
+                let base = endpoint.trim_end_matches('/');
+                let upload_url = if base.ends_with(&bucket_name) {
+                    format!("{}/{}", base, key_in_bucket)
+                } else {
+                    format!("{}/{}/{}", base, bucket_name, key_in_bucket)
+                };
+
+                let access_key = std::env::var("AWS_ACCESS_KEY_ID")
+                    .or_else(|_| std::env::var("ACCESS_KEY_ID"))
+                    .unwrap_or_default();
+                let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY")
+                    .or_else(|_| std::env::var("SECRET_ACCESS_KEY"))
+                    .unwrap_or_default();
+                let region = std::env::var("AWS_REGION")
+                    .or_else(|_| std::env::var("REGION"))
+                    .unwrap_or_else(|_| "auto".into());
+
+                let url = match Url::parse(&upload_url) {
+                    Ok(u) => u,
+                    Err(e) => {
+                        return HttpResponse::InternalServerError()
+                            .json(serde_json::json!({"error": e.to_string()}));
+                    }
+                };
+
+                let host = match url.host_str() {
+                    Some(h) => {
+                        if let Some(port) = url.port() {
+                            format!("{}:{}", h, port)
+                        } else {
+                            h.to_string()
+                        }
+                    }
+                    None => {
+                        return HttpResponse::InternalServerError()
+                            .json(serde_json::json!({"error": "invalid upload URL host"}));
+                    }
+                };
+
+                let amz_date = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+                let datestamp = Utc::now().format("%Y%m%d").to_string();
+
+                let payload_hash = {
+                    let mut hasher = Sha256Inner::new();
+                    hasher.update(&data);
+                    hex_encode(hasher.finalize())
+                };
+
+                let canonical_uri = url.path();
+
+                let canonical_headers = format!(
+                    "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+                    host, payload_hash, amz_date
+                );
+                let signed_headers = "host;x-amz-content-sha256;x-amz-date";
+
+                let canonical_request = format!(
+                    "PUT\n{}\n\n{}\n{}\n{}",
+                    canonical_uri, canonical_headers, signed_headers, payload_hash
+                );
+
+                let mut hasher = Sha256Inner::new();
+                hasher.update(canonical_request.as_bytes());
+                let canonical_request_hash = hex_encode(hasher.finalize());
+
+                let scope = format!("{}/{}/s3/aws4_request", datestamp, region);
+                let string_to_sign = format!(
+                    "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+                    amz_date, scope, canonical_request_hash
+                );
+
+                type HmacSha256 = Hmac<Sha256Inner>;
+                fn hmac(key: &[u8], msg: &str) -> Vec<u8> {
+                    let mut mac =
+                        HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
+                    mac.update(msg.as_bytes());
+                    mac.finalize().into_bytes().to_vec()
+                }
+
+                let k_secret = format!("AWS4{}", secret_key);
+                let k_date = hmac(k_secret.as_bytes(), &datestamp);
+                let k_region = hmac(&k_date, &region);
+                let k_service = hmac(&k_region, "s3");
+                let k_signing = hmac(&k_service, "aws4_request");
+
+                let signature = hex_encode(hmac(&k_signing, &string_to_sign));
+
+                let authorization = format!(
+                    "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+                    access_key, scope, signed_headers, signature
+                );
+
+                let client = HttpClient::new();
+                let mut headers = HeaderMap::new();
+                headers.insert(HOST, HeaderValue::from_str(&host).unwrap());
+                headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
+                headers.insert(
+                    "x-amz-content-sha256",
+                    HeaderValue::from_str(&payload_hash).unwrap(),
+                );
+                headers.insert(
+                    "authorization",
+                    HeaderValue::from_str(&authorization).unwrap(),
+                );
+                headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/octet-stream"),
+                );
+
+                match client.put(url).headers(headers).body(data).send().await {
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            Ok(format!("{}", upload_url))
+                        } else {
+                            Err(format!("upload failed: {}", resp.status()))
+                        }
                     }
                     Err(e) => Err(e.to_string()),
                 }
