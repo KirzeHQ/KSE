@@ -522,6 +522,50 @@ async fn queue() -> impl Responder {
 }
 
 #[derive(Serialize)]
+struct PendingEntry {
+    id: i64,
+    source: String,
+    path: String,
+    timestamp: i64,
+    attempts: i64,
+    last_error: Option<String>,
+}
+
+async fn upload_queue(state: web::Data<AppState>) -> impl Responder {
+    let conn = state.db.lock().unwrap();
+    let mut stmt = match conn.prepare("SELECT id, source, path, timestamp, attempts, last_error FROM scrapes WHERE status = 'pending' ORDER BY timestamp ASC") {
+        Ok(s) => s,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok(PendingEntry {
+            id: row.get(0)?,
+            source: row.get(1)?,
+            path: row.get(2)?,
+            timestamp: row.get(3)?,
+            attempts: row.get(4)?,
+            last_error: row.get(5)?,
+        })
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": e.to_string()}));
+        }
+    };
+
+    let mut items: Vec<PendingEntry> = Vec::new();
+    for r in rows {
+        if let Ok(entry) = r {
+            items.push(entry);
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"pending": items}))
+}
+
+#[derive(Serialize)]
 struct ScraperEntry {
     id: String,
     name: String,
@@ -836,6 +880,7 @@ async fn main() -> std::io::Result<()> {
                 "/scraper/{id}/assigned-sources",
                 web::get().to(scraper_assigned_sources),
             )
+            .route("/upload/queue", web::get().to(upload_queue))
     })
     .bind(&bind_addr)?
     .run()
