@@ -14,9 +14,8 @@ Coming soon but here is a quick overview of how it will work:
 - The API assigns you an ID and API key.
 - You run the scraper with the assigned ID and API key. (config.ini)
 - Scrapers are automatically assigned a website to scrape based on a queue system.
-- Your scraper will submit scrapes to the API. Once three versions of a website have been recorded from three independent scrapers, the API will store the data.
-- As your scraper gains trust and reliability, fewer scrapes will be required from other scrapers for the data to be stored.
-- Eventually you can submit your scraper for review and if it is deemed reliable then you will be added to a list of trusted scrapers and your scrapes will be stored immediately without waiting for other scrapers to submit the same data.
+- Your scraper will submit scrapes to the API.
+- It is then stored
 
 ## Code Contributions
 
