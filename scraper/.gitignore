@@ -10,3 +10,6 @@ dist
 .eslintcache
 .cache
 *.tsbuildinfo
+
+# sensitive (kinda)
+.scraper.json
