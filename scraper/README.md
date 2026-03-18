@@ -18,32 +18,19 @@ The scraper now submits a minimal JSON payload per page containing the fields th
 - `fetches` — number of times this page has been fetched (number, scraper sets `1`)
 - `content_hash` — SHA-256 hex of the raw HTML (string)
 
-This keeps the payload compact while providing the metadata needed for indexing. See `index.js` for the exact extraction code.
+## Scraper configuration
 
-## Configuring the scraper (`.scraper.json`)
-
-The scraper reads and persists its runtime config in `.scraper.json` in the scraper folder. Put any site seeds and runtime limits under `config`.
-
-Example `.scraper.json`:
-
-{
-	"config": {
-		"seeds": [
-			"https://example.com",
-			"https://another.example"
-		],
-		"max_pages": 200,
-		"max_depth": 3,
-		"concurrency": 5,
-		"continuous": true,
-		"poll_interval_seconds": 600,
-		"revisit_after_seconds": 86400,
-		"ram_limit_mb": 512,
-		"cpu_ops_per_sec": 5
-	}
-}
-
-- `seeds`: array of seed URLs the crawler should start from (required to override defaults).
-- `ram_limit_mb`: optional integer to request a soft memory limit in MB; when exceeded the crawler will pause briefly.
-- `cpu_ops_per_sec`: optional integer to throttle request rate (approx requests per second) to reduce CPU usage.
-
+- `api_key` (string) — optional API key used to authenticate with the API.
+- `scraper_id` (string) — optional scraper identifier assigned by the API.
+- `type` (string, default `crawler`) — `crawler` (submit URL-only items to the queue) or `scraper` (poll queue and fetch pages).
+- `seeds` (array of strings) — seed URLs to start from.
+- `max_pages` (integer) — total pages to fetch before stopping.
+- `max_depth` (integer) — maximum link depth to follow.
+- `concurrency` (integer) — number of simultaneous network tasks (I/O parallelism).
+- `workers` (integer) — number of worker threads for CPU-bound parsing (defaults to CPU cores if omitted).
+- `continuous` (boolean) — keep running and polling for work instead of exiting after the run.
+- `test` (boolean) — enable test mode (short runs, extra diagnostics).
+- `test_duration_seconds` (integer) — runtime in seconds when `test` is enabled.
+- `mega_submit_batch_size` (integer) — number of URL-only items buffered before a single `/queue/mega-submit` POST.
+- `mega_submit_interval_seconds` (integer) — background flush interval (seconds) for partial mega-batches.
+- `scraped_file`, `crawler_file`, `state_file` (strings) — local filenames for runtime artifacts.
