@@ -431,7 +431,6 @@ async fn create_and_upload_archive(
                         params![remote_path, member_name, id],
                     ) {
                         any_err = Some(e.to_string());
-                        
                         continue;
                     }
                     let _ = fs::remove_file(&p);
