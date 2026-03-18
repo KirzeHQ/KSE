@@ -6,7 +6,6 @@ use chrono::Utc;
 use dotenvy::dotenv;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use fs2::FileExt;
 use hex::encode as hex_encode;
 use hmac::{Hmac, Mac};
 use rand::{Rng, distributions::Alphanumeric};
@@ -15,99 +14,43 @@ use reqwest::Url;
 use reqwest::header::{CONTENT_TYPE, HOST, HeaderMap, HeaderValue};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use sha2::Digest;
 use sha2::Sha256 as Sha256Inner;
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::fs::OpenOptions;
-use std::io::Write;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tar::Builder as TarBuilder;
 use uuid::Uuid;
 
-fn load_api_map(path: &PathBuf) -> std::io::Result<std::collections::HashMap<String, Vec<String>>> {
-    let mut map = std::collections::HashMap::new();
-    if !path.exists() {
-        return Ok(map);
-    }
-    let f = OpenOptions::new().read(true).open(path)?;
+fn ensure_auth_dbs() -> Result<(), rusqlite::Error> {
+    let data_dir = PathBuf::from("data");
+    let _ = std::fs::create_dir_all(&data_dir);
+    let api_db = data_dir.join("api_keys.db");
+    let scrapers_db = data_dir.join("scrapers.db");
 
-    f.lock_shared()?;
-    let mut s = String::new();
-    std::io::Read::read_to_string(&mut &f, &mut s)?;
+    let aconn = Connection::open(api_db)?;
+    aconn.execute(
+        "CREATE TABLE IF NOT EXISTS api_keys (
+            api_key TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
 
-    f.unlock()?;
+    let sconn = Connection::open(scrapers_db)?;
+    sconn.execute(
+        "CREATE TABLE IF NOT EXISTS scrapers (
+            id TEXT PRIMARY KEY,
+            api_key TEXT NOT NULL,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
 
-    for line in s.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if let Some(pos) = line.find('=') {
-            let key = line[..pos].to_string();
-            let val = line[pos + 1..].trim();
-            let ids: Vec<String> = if val.is_empty() {
-                Vec::new()
-            } else {
-                val.split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            };
-            map.insert(key, ids);
-        }
-    }
-    Ok(map)
-}
-
-fn save_api_map(
-    path: &PathBuf,
-    map: &std::collections::HashMap<String, Vec<String>>,
-) -> std::io::Result<()> {
-    let mut out = String::new();
-    for (k, v) in map.iter() {
-        out.push_str(&format!("{}={}\n", k, v.join(",")));
-    }
-    let f = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)?;
-
-    f.lock_exclusive()?;
-    std::io::Write::write_all(&mut &f, out.as_bytes())?;
-    f.sync_all()?;
-    f.unlock()?;
-    Ok(())
-}
-
-fn load_id_list(path: &PathBuf) -> std::io::Result<Vec<JsonValue>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    let f = OpenOptions::new().read(true).open(path)?;
-    f.lock_shared()?;
-    let mut s = String::new();
-    std::io::Read::read_to_string(&mut &f, &mut s)?;
-    f.unlock()?;
-    let v: Vec<JsonValue> = serde_json::from_str(&s).unwrap_or_else(|_| Vec::new());
-    Ok(v)
-}
-
-fn save_id_list(path: &PathBuf, list: &Vec<JsonValue>) -> std::io::Result<()> {
-    let s = serde_json::to_string_pretty(list).unwrap_or_else(|_| "[]".into());
-    let f = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(path)?;
-    f.lock_exclusive()?;
-    std::io::Write::write_all(&mut &f, s.as_bytes())?;
-    f.sync_all()?;
-    f.unlock()?;
     Ok(())
 }
 
@@ -134,8 +77,6 @@ struct RegisterRequest {
 
 #[derive(Clone)]
 struct Config {
-    bind_addr: String,
-    db_file: String,
     hot_dir: String,
     cold_dir: String,
     s3_bucket: Option<String>,
@@ -322,32 +263,37 @@ async fn create_and_upload_archive(
 }
 
 async fn register_scraper(
-    state: web::Data<AppState>,
-    body: web::Json<RegisterRequest>,
+    _state: web::Data<AppState>,
+    _body: web::Json<RegisterRequest>,
 ) -> impl Responder {
     let api_key: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(40)
         .map(char::from)
         .collect();
-
-    let data_dir = PathBuf::from("data");
-    let _ = fs::create_dir_all(&data_dir);
-    let ini_path = data_dir.join("api.ini");
-
-    let mut map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
-    map.insert(api_key.clone(), Vec::new());
-    if let Err(e) = save_api_map(&ini_path, &map) {
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": e.to_string()}));
+    let _ = ensure_auth_dbs();
+    let api_db = PathBuf::from("data").join("api_keys.db");
+    match Connection::open(&api_db) {
+        Ok(conn) => {
+            let ts = Utc::now().timestamp();
+            if let Err(e) = conn.execute(
+                "INSERT INTO api_keys (api_key, created_at) VALUES (?1, ?2)",
+                params![api_key.clone(), ts],
+            ) {
+                return HttpResponse::InternalServerError()
+                    .json(serde_json::json!({"error": e.to_string()}));
+            }
+            HttpResponse::Ok().json(serde_json::json!({"api_key": api_key}))
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
     }
-
-    HttpResponse::Ok().json(serde_json::json!({"api_key": api_key}))
 }
 
 async fn scraper_register(
     req: HttpRequest,
-    state: web::Data<AppState>,
+    _state: web::Data<AppState>,
     body: web::Json<RegisterRequest>,
 ) -> impl Responder {
     let auth_hdr = req
@@ -359,37 +305,54 @@ async fn scraper_register(
     if api_key.is_empty() {
         return HttpResponse::Unauthorized().json(serde_json::json!({"error": "Missing API key"}));
     }
+    let _ = ensure_auth_dbs();
+    let api_db = PathBuf::from("data").join("api_keys.db");
+    let scrapers_db = PathBuf::from("data").join("scrapers.db");
 
-    let data_dir = PathBuf::from("data");
-    let _ = fs::create_dir_all(&data_dir);
-    let ini_path = data_dir.join("api.ini");
-    if !ini_path.exists() {
-        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "invalid API key"}));
-    }
-
-    let mut map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
-    if !map.contains_key(api_key) {
-        return HttpResponse::Unauthorized().json(serde_json::json!({"error": "invalid API key"}));
+    match Connection::open(&api_db) {
+        Ok(conn) => {
+            let mut stmt = match conn.prepare("SELECT 1 FROM api_keys WHERE api_key = ?1") {
+                Ok(s) => s,
+                Err(_) => {
+                    return HttpResponse::Unauthorized()
+                        .json(serde_json::json!({"error": "invalid API key"}));
+                }
+            };
+            let mut rows = match stmt.query_map(params![api_key], |_row| Ok(1)) {
+                Ok(r) => r,
+                Err(_) => {
+                    return HttpResponse::Unauthorized()
+                        .json(serde_json::json!({"error": "invalid API key"}));
+                }
+            };
+            if rows.next().is_none() {
+                return HttpResponse::Unauthorized()
+                    .json(serde_json::json!({"error": "invalid API key"}));
+            }
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": "auth DB open failed"}));
+        }
     }
 
     let new_id = Uuid::new_v4().to_string();
-    let id_list_path = data_dir.join("id-list.json");
-    let mut id_list: Vec<JsonValue> = load_id_list(&id_list_path).unwrap_or_else(|_| Vec::new());
-    let entry = serde_json::json!({"id": new_id, "name": body.name.clone(), "created_at": Utc::now().timestamp()});
-    id_list.push(entry);
-    if let Err(e) = save_id_list(&id_list_path, &id_list) {
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": e.to_string()}));
+    let ts = Utc::now().timestamp();
+    match Connection::open(&scrapers_db) {
+        Ok(conn) => {
+            if let Err(e) = conn.execute(
+                "INSERT INTO scrapers (id, api_key, name, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![new_id.clone(), api_key, body.name.clone(), ts],
+            ) {
+                return HttpResponse::InternalServerError()
+                    .json(serde_json::json!({"error": e.to_string()}));
+            }
+            HttpResponse::Ok().json(serde_json::json!({"id": new_id}))
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
     }
-
-    let list = map.entry(api_key.to_string()).or_default();
-    list.push(new_id.clone());
-    if let Err(e) = save_api_map(&ini_path, &map) {
-        return HttpResponse::InternalServerError()
-            .json(serde_json::json!({"error": e.to_string()}));
-    }
-
-    HttpResponse::Ok().json(serde_json::json!({"id": new_id}))
 }
 
 async fn submit_data(
@@ -410,18 +373,39 @@ async fn submit_data(
         });
     }
 
-    let data_dir = PathBuf::from("data");
-    let ini_path = data_dir.join("api.ini");
-    if !ini_path.exists() {
-        return HttpResponse::Unauthorized().json(Message {
-            message: "Invalid API key",
-        });
-    }
-    let map = load_api_map(&ini_path).unwrap_or_else(|_| std::collections::HashMap::new());
-    if !map.contains_key(token) {
-        return HttpResponse::Unauthorized().json(Message {
-            message: "Invalid API key",
-        });
+    let _ = ensure_auth_dbs();
+    let api_db = PathBuf::from("data").join("api_keys.db");
+    let scrapers_db = PathBuf::from("data").join("scrapers.db");
+
+    match Connection::open(&api_db) {
+        Ok(conn) => {
+            let mut stmt = match conn.prepare("SELECT 1 FROM api_keys WHERE api_key = ?1") {
+                Ok(s) => s,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            let mut rows = match stmt.query_map(params![token], |_row| Ok(1)) {
+                Ok(r) => r,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            if rows.next().is_none() {
+                return HttpResponse::Unauthorized().json(Message {
+                    message: "Invalid API key",
+                });
+            }
+        }
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(Message {
+                message: "Invalid API key",
+            });
+        }
     }
 
     let q_params: HashMap<String, String> = req
@@ -448,11 +432,34 @@ async fn submit_data(
         });
     }
 
-    let assigned_ids = map.get(token).cloned().unwrap_or_default();
-    if !assigned_ids.contains(&scraper_id.as_ref().unwrap().to_string()) {
-        return HttpResponse::Unauthorized().json(Message {
-            message: "Scraper id not assigned to API key",
-        });
+    match Connection::open(&scrapers_db) {
+        Ok(conn) => {
+            let id = scraper_id.as_ref().unwrap();
+            let row = conn.query_row(
+                "SELECT api_key FROM scrapers WHERE id = ?1",
+                params![id],
+                |r| r.get::<usize, String>(0),
+            );
+            match row {
+                Ok(owner_key) => {
+                    if owner_key != token {
+                        return HttpResponse::Unauthorized().json(Message {
+                            message: "Scraper id not assigned to API key",
+                        });
+                    }
+                }
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Scraper id not found",
+                    });
+                }
+            }
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError().json(Message {
+                message: "auth DB error",
+            });
+        }
     }
 
     let q: HashMap<String, String> = req
@@ -703,21 +710,38 @@ async fn upload_queue(state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"pending": items}))
 }
 
-#[derive(Serialize)]
-struct ScraperEntry {
-    id: String,
-    name: String,
-    created_at: i64,
-}
-
-async fn trusted_scrapers(state: web::Data<AppState>) -> impl Responder {
-    let data_dir = PathBuf::from("data");
-    let id_list_path = data_dir.join("id-list.json");
-    if !id_list_path.exists() {
-        return HttpResponse::Ok().json(serde_json::json!({"scrapers": []}));
+async fn trusted_scrapers(_state: web::Data<AppState>) -> impl Responder {
+    let _ = ensure_auth_dbs();
+    let scrapers_db = PathBuf::from("data").join("scrapers.db");
+    match Connection::open(&scrapers_db) {
+        Ok(conn) => {
+            let mut stmt = match conn
+                .prepare("SELECT id, name, created_at FROM scrapers ORDER BY created_at DESC")
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    return HttpResponse::InternalServerError()
+                        .json(serde_json::json!({"error": e.to_string()}));
+                }
+            };
+            let rows = match stmt.query_map([], |row| {
+                Ok(serde_json::json!({"id": row.get::<usize,String>(0)?, "name": row.get::<usize,String>(1)?, "created_at": row.get::<usize,i64>(2)?}))
+            }) {
+                Ok(r) => r,
+                Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+            };
+            let mut items = Vec::new();
+            for r in rows {
+                if let Ok(j) = r {
+                    items.push(j);
+                }
+            }
+            HttpResponse::Ok().json(serde_json::json!({"scrapers": items}))
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
     }
-    let vlist = load_id_list(&id_list_path).unwrap_or_else(|_| Vec::new());
-    HttpResponse::Ok().json(serde_json::json!({"scrapers": vlist}))
 }
 
 fn list_files_recursive(dir: &PathBuf, base: &PathBuf, out: &mut Vec<String>) {
@@ -882,9 +906,11 @@ async fn main() -> std::io::Result<()> {
     )
     .unwrap();
 
+    if let Err(e) = ensure_auth_dbs() {
+        eprintln!("Failed to initialize auth DBs: {}", e);
+    }
+
     let config = Config {
-        bind_addr: bind_addr.clone(),
-        db_file: db_file.clone(),
         hot_dir: hot_dir.clone(),
         cold_dir,
         s3_bucket,
