@@ -4,8 +4,6 @@ use actix_web::{
 };
 use chrono::Utc;
 use dotenvy::dotenv;
-use flate2::Compression;
-use flate2::write::GzEncoder;
 use hex::encode as hex_encode;
 use hmac::{Hmac, Mac};
 use rand::{Rng, distributions::Alphanumeric};
@@ -21,8 +19,10 @@ use std::fs;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tar::Builder as TarBuilder;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use publicsuffix::List;
+use std::thread;
 use uuid::Uuid;
 
 fn ensure_auth_dbs() -> Result<(), rusqlite::Error> {
@@ -54,6 +54,124 @@ fn ensure_auth_dbs() -> Result<(), rusqlite::Error> {
     Ok(())
 }
 
+fn ensure_scrapes_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info('scrapes')")?;
+    let cols: Result<Vec<String>, _> = stmt
+        .query_map([], |row| row.get::<usize, String>(1))?
+        .collect();
+    let cols = cols.unwrap_or_default();
+
+    if cols.is_empty() {
+        conn.execute(
+            "CREATE TABLE scrapes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                path TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                scraper_id TEXT,
+                status TEXT DEFAULT 'pending',
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT,
+                remote_path TEXT,
+                member_name TEXT
+            )",
+            [],
+        )?;
+        return Ok(());
+    }
+
+    let ensure_col = |name: &str, def: &str| -> Result<(), rusqlite::Error> {
+        if !cols.iter().any(|c| c == name) {
+            let q = format!("ALTER TABLE scrapes ADD COLUMN {} {}", name, def);
+            conn.execute(&q, [])?;
+        }
+        Ok(())
+    };
+
+    ensure_col("status", "TEXT DEFAULT 'pending'")?;
+    ensure_col("attempts", "INTEGER DEFAULT 0")?;
+    ensure_col("last_error", "TEXT")?;
+    ensure_col("remote_path", "TEXT")?;
+    ensure_col("member_name", "TEXT")?;
+
+    ensure_col("title", "TEXT")?;
+    ensure_col("canonical", "TEXT")?;
+    ensure_col("outlinks_count", "INTEGER DEFAULT 0")?;
+    ensure_col("lang", "TEXT")?;
+    ensure_col("description", "TEXT")?;
+    ensure_col("fetches", "INTEGER DEFAULT 1")?;
+    ensure_col("content_hash", "TEXT")?;
+    ensure_col("http_status", "INTEGER")?;
+
+    Ok(())
+}
+
+fn domain_path_for_host(host: &str, list_opt: Option<&List>) -> String {
+    let host = host.trim().to_lowercase();
+    if host.is_empty() {
+        return host;
+    }
+
+    if let Some(list) = list_opt {
+        if let Ok(domain) = list.parse_domain(&host) {
+            let suffix = domain.suffix().unwrap_or("").to_string();
+            let registrable_full = domain.root().unwrap_or(&host).to_string();
+
+            let registrable =
+                if !suffix.is_empty() && registrable_full.ends_with(&format!(".{}", suffix)) {
+                    let cut = registrable_full.len() - suffix.len() - 1;
+                    registrable_full[..cut].to_string()
+                } else {
+                    registrable_full.clone()
+                };
+            let full = domain.full();
+            let sub = if let Some(root) = domain.root() {
+                if full.ends_with(root) && full.len() > root.len() {
+                    let cut = full.len() - root.len() - 1;
+                    &full[..cut]
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+            let mut filtered_vec: Vec<&str> = Vec::new();
+            for label in sub.split('.') {
+                if !label.is_empty() && label != "www" {
+                    filtered_vec.push(label);
+                }
+            }
+            if filtered_vec.is_empty() {
+                return format!("{}/{}/@", suffix, registrable);
+            } else {
+                return format!("{}/{}/{}", suffix, registrable, filtered_vec.join("/"));
+            }
+        }
+    }
+
+    let parts: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return host;
+    }
+    if parts.len() == 1 {
+        return parts[0].to_string();
+    }
+    let base_idx = parts.len().saturating_sub(2);
+    let base = parts[base_idx].to_string();
+    let subparts = &parts[..base_idx];
+    let filtered: Vec<&str> = subparts.iter().copied().filter(|s| *s != "www").collect();
+    if filtered.is_empty() {
+        format!("{}/@", base)
+    } else {
+        format!(
+            "{}/{}/{}",
+            parts.last().unwrap_or(&""),
+            base,
+            filtered.join("/")
+        )
+    }
+}
+
 #[derive(Serialize)]
 struct Message {
     message: &'static str,
@@ -81,11 +199,13 @@ struct Config {
     cold_dir: String,
     s3_bucket: Option<String>,
     s3_endpoint: Option<String>,
+    disable_s3: bool,
 }
 
 struct AppState {
     config: Config,
     db: Mutex<Connection>,
+    ps_list: Mutex<Option<List>>,
 }
 
 async fn upload_bytes_signed(upload_url: &str, data: &[u8]) -> Result<String, String> {
@@ -176,7 +296,10 @@ async fn upload_bytes_signed(upload_url: &str, data: &[u8]) -> Result<String, St
         "authorization",
         HeaderValue::from_str(&authorization).map_err(|e| e.to_string())?,
     );
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/gzip"));
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
 
     let resp = client
         .put(url)
@@ -198,66 +321,91 @@ async fn create_and_upload_archive(
     source: &str,
     items: &[(i64, String)],
 ) -> Result<(), String> {
-    let mut buf: Vec<u8> = Vec::new();
-    {
-        let enc = GzEncoder::new(&mut buf, Compression::default());
-        let mut tar = TarBuilder::new(enc);
-        for (_id, local_path) in items.iter() {
-            let p = PathBuf::from(local_path);
-            let file_name = p
+    let domain_path = domain_path_for_host(source, state.ps_list.lock().unwrap().as_ref());
+
+    let mut any_err: Option<String> = None;
+    let conn = state.db.lock().unwrap();
+
+    if state.config.disable_s3 || state.config.s3_bucket.is_none() {
+        for (id, local_path) in items.iter() {
+            let member_name = PathBuf::from(local_path)
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "file.bin".into());
-            tar.append_path_with_name(&p, file_name)
-                .map_err(|e| e.to_string())?;
-        }
 
-        let enc = tar.into_inner().map_err(|e| e.to_string())?;
-        enc.finish().map_err(|e| e.to_string())?;
-    }
-
-    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
-    let bucket = match &state.config.s3_bucket {
-        Some(b) => b.clone(),
-        None => return Err("no S3 bucket configured".into()),
-    };
-    let prefix = std::env::var("ARCHIVE_PREFIX").unwrap_or_else(|_| "archives".into());
-    let archive_key = format!("{}/{}/{}.tar.gz", prefix, source, ts);
-    let endpoint = state.config.s3_endpoint.clone().unwrap_or_default();
-    let base = if endpoint.is_empty() {
-        format!("https://{}/{}", "r2.cloudflarestorage.com", bucket)
-    } else {
-        endpoint.trim_end_matches('/').to_string()
-    };
-    let upload_url = if base.ends_with(&bucket) {
-        format!("{}/{}", base, archive_key)
-    } else {
-        format!("{}/{}/{}", base, bucket, archive_key)
-    };
-
-    let res = upload_bytes_signed(&upload_url, &buf).await;
-    match res {
-        Ok(remote) => {
-            let conn = state.db.lock().unwrap();
-            for (id, local_path) in items.iter() {
-                let member_name = PathBuf::from(local_path)
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "file.bin".into());
-                let _ = conn.execute("UPDATE scrapes SET status = 'uploaded', remote_path = ?1, member_name = ?2 WHERE id = ?3", params![remote, member_name, id]);
-                let _ = fs::remove_file(local_path);
+            let remote_path = local_path.clone();
+            match conn.execute(
+                "UPDATE scrapes SET status = 'uploaded', remote_path = ?1, member_name = ?2 WHERE id = ?3",
+                params![remote_path, member_name, id],
+            ) {
+                Ok(_) => {}
+                Err(e) => {
+                    any_err = Some(e.to_string());
+                }
             }
+        }
+        if let Some(e) = any_err {
+            Err(e)
+        } else {
             Ok(())
         }
-        Err(e) => {
-            let conn = state.db.lock().unwrap();
-            for (id, _path) in items.iter() {
-                let _ = conn.execute(
-                    "UPDATE scrapes SET attempts = attempts + 1, last_error = ?1 WHERE id = ?2",
-                    params![e.clone(), id],
-                );
+    } else {
+        let bucket = match &state.config.s3_bucket {
+            Some(b) => b.clone(),
+            None => return Err("no S3 bucket configured".into()),
+        };
+        for (id, local_path) in items.iter() {
+            match fs::read(local_path) {
+                Ok(data) => {
+                    let member_name = PathBuf::from(local_path)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file.bin".into());
+
+                    let endpoint = state.config.s3_endpoint.clone().unwrap_or_default();
+                    let base = if endpoint.is_empty() {
+                        format!("https://{}/{}", "r2.cloudflarestorage.com", bucket)
+                    } else {
+                        endpoint.trim_end_matches('/').to_string()
+                    };
+
+                    let upload_url = if base.ends_with(&bucket) {
+                        format!("{}/{}/{}", base, domain_path, member_name)
+                    } else {
+                        format!("{}/{}/{}/{}", base, bucket, domain_path, member_name)
+                    };
+
+                    match upload_bytes_signed(&upload_url, &data).await {
+                        Ok(remote) => {
+                            let _ = conn.execute(
+                                "UPDATE scrapes SET status = 'uploaded', remote_path = ?1, member_name = ?2 WHERE id = ?3",
+                                params![remote, member_name, id],
+                            );
+                            let _ = fs::remove_file(local_path);
+                        }
+                        Err(e) => {
+                            any_err = Some(e.clone());
+                            let _ = conn.execute(
+                                "UPDATE scrapes SET attempts = attempts + 1, last_error = ?1 WHERE id = ?2",
+                                params![e.clone(), id],
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    any_err = Some(e.to_string());
+                    let _ = conn.execute(
+                        "UPDATE scrapes SET attempts = attempts + 1, last_error = ?1 WHERE id = ?2",
+                        params![e.to_string(), id],
+                    );
+                }
             }
+        }
+
+        if let Some(e) = any_err {
             Err(e)
+        } else {
+            Ok(())
         }
     }
 }
@@ -474,14 +622,29 @@ async fn submit_data(
         })
         .collect();
 
-    let source = q.get("source").cloned().unwrap_or_else(|| "unknown".into());
+    let source_raw = q.get("source").cloned().unwrap_or_else(|| "unknown".into());
+
+    let mut source_host = source_raw.clone();
+    if source_host.contains('/') {
+        if let Ok(u) = Url::parse(&source_host) {
+            if let Some(h) = u.host_str() {
+                source_host = h.to_string();
+            }
+        } else if let Ok(u) = Url::parse(&format!("https://{}", source_host)) {
+            if let Some(h) = u.host_str() {
+                source_host = h.to_string();
+            }
+        }
+    }
+
+    let domain_path = domain_path_for_host(&source_host, state.ps_list.lock().unwrap().as_ref());
 
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
     let mut path = PathBuf::from(&state.config.hot_dir);
-    path.push(&source);
+    path.push(&domain_path);
     let _ = fs::create_dir_all(&path);
     path.push(format!("{}.bin", ts));
 
@@ -491,9 +654,46 @@ async fn submit_data(
             let conn = state.db.lock().unwrap();
             let ts = Utc::now().timestamp();
             let scraper = scraper_id.unwrap();
+
+            let mut title: Option<String> = None;
+            let mut canonical: Option<String> = None;
+            let mut outlinks_count: Option<i64> = None;
+            let mut lang: Option<String> = None;
+            let mut description: Option<String> = None;
+            let mut fetches: Option<i64> = Some(1);
+            let mut content_hash: Option<String> = None;
+            let mut http_status: Option<i64> = None;
+
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+                if let Some(s) = v.get("title").and_then(|x| x.as_str()) {
+                    title = Some(s.to_string());
+                }
+                if let Some(s) = v.get("canonical").and_then(|x| x.as_str()) {
+                    canonical = Some(s.to_string());
+                }
+                if let Some(n) = v.get("outlinks_count").and_then(|x| x.as_i64()) {
+                    outlinks_count = Some(n);
+                }
+                if let Some(s) = v.get("lang").and_then(|x| x.as_str()) {
+                    lang = Some(s.to_string());
+                }
+                if let Some(s) = v.get("description").and_then(|x| x.as_str()) {
+                    description = Some(s.to_string());
+                }
+                if let Some(n) = v.get("fetches").and_then(|x| x.as_i64()) {
+                    fetches = Some(n);
+                }
+                if let Some(s) = v.get("content_hash").and_then(|x| x.as_str()) {
+                    content_hash = Some(s.to_string());
+                }
+                if let Some(n) = v.get("status").and_then(|x| x.as_i64()) {
+                    http_status = Some(n);
+                }
+            }
+
             let r = conn.execute(
-                "INSERT INTO scrapes (source, path, timestamp, scraper_id, status) VALUES (?1, ?2, ?3, ?4, 'pending')",
-                params![source, local_path_s, ts, scraper],
+                "INSERT INTO scrapes (source, path, timestamp, scraper_id, status, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status) VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![source_host, local_path_s, ts, scraper, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status],
             );
             if let Err(e) = r {
                 return HttpResponse::InternalServerError()
@@ -889,38 +1089,58 @@ async fn main() -> std::io::Result<()> {
     )
     .unwrap();
 
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS scrapes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source TEXT NOT NULL,
-            path TEXT NOT NULL,
-            timestamp INTEGER NOT NULL,
-            scraper_id TEXT,
-            status TEXT DEFAULT 'pending',
-            attempts INTEGER DEFAULT 0,
-            last_error TEXT,
-            remote_path TEXT,
-            member_name TEXT
-        )",
-        [],
-    )
-    .unwrap();
+    if let Err(e) = ensure_scrapes_schema(&conn) {
+        eprintln!("failed to ensure scrapes schema: {}", e);
+    }
 
     if let Err(e) = ensure_auth_dbs() {
         eprintln!("Failed to initialize auth DBs: {}", e);
     }
+
+    let disable_s3 = std::env::var("DISABLE_S3")
+        .ok()
+        .map(|s| s == "1" || s.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     let config = Config {
         hot_dir: hot_dir.clone(),
         cold_dir,
         s3_bucket,
         s3_endpoint,
+        disable_s3,
     };
     let state = AppState {
         config,
         db: Mutex::new(conn),
+        ps_list: Mutex::new(None),
     };
     let shared = web::Data::new(state);
+
+    {
+        let pshared = shared.clone();
+        actix_web::rt::spawn(async move {
+            let refresh_hours: u64 = std::env::var("PSL_REFRESH_HOURS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(24);
+            loop {
+                {
+                    let pshared2 = pshared.clone();
+                    thread::spawn(move || match List::fetch() {
+                        Ok(list) => {
+                            let mut lock = pshared2.ps_list.lock().unwrap();
+                            *lock = Some(list);
+                            eprintln!("public suffix list updated");
+                        }
+                        Err(e) => {
+                            eprintln!("failed to fetch public suffix list: {}", e);
+                        }
+                    });
+                }
+                actix_web::rt::time::sleep(Duration::from_secs(refresh_hours * 3600)).await;
+            }
+        });
+    }
 
     {
         let worker_shared = shared.clone();
@@ -929,10 +1149,7 @@ async fn main() -> std::io::Result<()> {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(30);
-            let max_archive_bytes: u64 = std::env::var("MAX_ARCHIVE_BYTES")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(5 * 1024 * 1024);
+
             let mut interval =
                 actix_web::rt::time::interval(std::time::Duration::from_secs(interval_min * 60));
             loop {
@@ -959,29 +1176,15 @@ async fn main() -> std::io::Result<()> {
                 }
 
                 for (source, items) in groups {
-                    let mut chunk: Vec<(i64, String)> = Vec::new();
-                    let mut cur: u64 = 0;
-                    for (id, path, size) in items.into_iter() {
-                        if cur + size > max_archive_bytes && !chunk.is_empty() {
-                            let chunk_clone = chunk.clone();
-                            if let Err(e) =
-                                create_and_upload_archive(&worker_shared, &source, &chunk_clone)
-                                    .await
-                            {
-                                eprintln!("archive upload error: {}", e);
-                            }
-                            chunk.clear();
-                            cur = 0;
-                        }
-                        chunk.push((id, path));
-                        cur += size;
+                    let mut all: Vec<(i64, String)> = Vec::new();
+                    for (id, path, _size) in items.into_iter() {
+                        all.push((id, path));
                     }
-                    if !chunk.is_empty() {
-                        let chunk_clone = chunk.clone();
+                    if !all.is_empty() {
                         if let Err(e) =
-                            create_and_upload_archive(&worker_shared, &source, &chunk_clone).await
+                            create_and_upload_archive(&worker_shared, &source, &all).await
                         {
-                            eprintln!("archive upload error: {}", e);
+                            eprintln!("upload error: {}", e);
                         }
                     }
                 }
