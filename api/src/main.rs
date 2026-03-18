@@ -205,7 +205,47 @@ struct Config {
 struct AppState {
     config: Config,
     db: Mutex<Connection>,
+    queue_db: Mutex<Connection>,
     ps_list: Mutex<Option<List>>,
+}
+
+fn ensure_queue_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    let mut stmt = conn.prepare("PRAGMA table_info('queue')")?;
+    let cols: Result<Vec<String>, _> = stmt
+        .query_map([], |row| row.get::<usize, String>(1))?
+        .collect();
+    let cols = cols.unwrap_or_default();
+
+    if cols.is_empty() {
+        conn.execute(
+            "CREATE TABLE queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                source TEXT,
+                scraper_id TEXT,
+                timestamp INTEGER NOT NULL,
+                status TEXT DEFAULT 'queued',
+                attempts INTEGER DEFAULT 0,
+                last_error TEXT
+            )",
+            [],
+        )?;
+        return Ok(());
+    }
+
+    let ensure_col = |name: &str, def: &str| -> Result<(), rusqlite::Error> {
+        if !cols.iter().any(|c| c == name) {
+            let q = format!("ALTER TABLE queue ADD COLUMN {} {}", name, def);
+            conn.execute(&q, [])?;
+        }
+        Ok(())
+    };
+
+    ensure_col("status", "TEXT DEFAULT 'queued'")?;
+    ensure_col("attempts", "INTEGER DEFAULT 0")?;
+    ensure_col("last_error", "TEXT")?;
+
+    Ok(())
 }
 
 async fn upload_bytes_signed(upload_url: &str, data: &[u8]) -> Result<String, String> {
@@ -354,50 +394,50 @@ async fn create_and_upload_archive(
             Some(b) => b.clone(),
             None => return Err("no S3 bucket configured".into()),
         };
+        let endpoint = state.config.s3_endpoint.clone();
+
         for (id, local_path) in items.iter() {
-            match fs::read(local_path) {
-                Ok(data) => {
-                    let member_name = PathBuf::from(local_path)
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "file.bin".into());
+            let p = PathBuf::from(local_path);
+            let member_name = p
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "file.bin".into());
 
-                    let endpoint = state.config.s3_endpoint.clone().unwrap_or_default();
-                    let base = if endpoint.is_empty() {
-                        format!("https://{}/{}", "r2.cloudflarestorage.com", bucket)
-                    } else {
-                        endpoint.trim_end_matches('/').to_string()
-                    };
-
-                    let upload_url = if base.ends_with(&bucket) {
-                        format!("{}/{}/{}", base, domain_path, member_name)
-                    } else {
-                        format!("{}/{}/{}/{}", base, bucket, domain_path, member_name)
-                    };
-
-                    match upload_bytes_signed(&upload_url, &data).await {
-                        Ok(remote) => {
-                            let _ = conn.execute(
-                                "UPDATE scrapes SET status = 'uploaded', remote_path = ?1, member_name = ?2 WHERE id = ?3",
-                                params![remote, member_name, id],
-                            );
-                            let _ = fs::remove_file(local_path);
-                        }
-                        Err(e) => {
-                            any_err = Some(e.clone());
-                            let _ = conn.execute(
-                                "UPDATE scrapes SET attempts = attempts + 1, last_error = ?1 WHERE id = ?2",
-                                params![e.clone(), id],
-                            );
-                        }
-                    }
-                }
+            let data = match fs::read(&p) {
+                Ok(d) => d,
                 Err(e) => {
                     any_err = Some(e.to_string());
-                    let _ = conn.execute(
-                        "UPDATE scrapes SET attempts = attempts + 1, last_error = ?1 WHERE id = ?2",
-                        params![e.to_string(), id],
-                    );
+                    continue;
+                }
+            };
+
+            let remote_key = if domain_path.is_empty() {
+                format!("{}", member_name)
+            } else {
+                format!("{}/{}", domain_path, member_name)
+            };
+
+            let upload_url = if let Some(ep) = endpoint.as_ref() {
+                let ep_trim = ep.trim_end_matches('/');
+                format!("{}/{}/{}", ep_trim, bucket, remote_key)
+            } else {
+                format!("https://{}.s3.amazonaws.com/{}", bucket, remote_key)
+            };
+
+            match upload_bytes_signed(&upload_url, &data).await {
+                Ok(remote_path) => {
+                    if let Err(e) = conn.execute(
+                        "UPDATE scrapes SET status = 'uploaded', remote_path = ?1, member_name = ?2 WHERE id = ?3",
+                        params![remote_path, member_name, id],
+                    ) {
+                        any_err = Some(e.to_string());
+                        
+                        continue;
+                    }
+                    let _ = fs::remove_file(&p);
+                }
+                Err(e) => {
+                    any_err = Some(e);
                 }
             }
         }
@@ -637,72 +677,121 @@ async fn submit_data(
         }
     }
 
-    let domain_path = domain_path_for_host(&source_host, state.ps_list.lock().unwrap().as_ref());
-
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let mut path = PathBuf::from(&state.config.hot_dir);
-    path.push(&domain_path);
-    let _ = fs::create_dir_all(&path);
-    path.push(format!("{}.bin", ts));
-
-    match fs::write(&path, &body) {
-        Ok(_) => {
-            let local_path_s = path.to_string_lossy().to_string();
-            let conn = state.db.lock().unwrap();
-            let ts = Utc::now().timestamp();
-            let scraper = scraper_id.unwrap();
-
-            let mut title: Option<String> = None;
-            let mut canonical: Option<String> = None;
-            let mut outlinks_count: Option<i64> = None;
-            let mut lang: Option<String> = None;
-            let mut description: Option<String> = None;
-            let mut fetches: Option<i64> = Some(1);
-            let mut content_hash: Option<String> = None;
-            let mut http_status: Option<i64> = None;
-
-            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
-                if let Some(s) = v.get("title").and_then(|x| x.as_str()) {
-                    title = Some(s.to_string());
-                }
-                if let Some(s) = v.get("canonical").and_then(|x| x.as_str()) {
-                    canonical = Some(s.to_string());
-                }
-                if let Some(n) = v.get("outlinks_count").and_then(|x| x.as_i64()) {
-                    outlinks_count = Some(n);
-                }
-                if let Some(s) = v.get("lang").and_then(|x| x.as_str()) {
-                    lang = Some(s.to_string());
-                }
-                if let Some(s) = v.get("description").and_then(|x| x.as_str()) {
-                    description = Some(s.to_string());
-                }
-                if let Some(n) = v.get("fetches").and_then(|x| x.as_i64()) {
-                    fetches = Some(n);
-                }
-                if let Some(s) = v.get("content_hash").and_then(|x| x.as_str()) {
-                    content_hash = Some(s.to_string());
-                }
-                if let Some(n) = v.get("status").and_then(|x| x.as_i64()) {
-                    http_status = Some(n);
-                }
+    let mut is_url_only = false;
+    let mut maybe_url: Option<String> = None;
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+        if v.get("url").is_some() && v.as_object().map_or(false, |m| m.len() == 1) {
+            if let Some(u) = v.get("url").and_then(|x| x.as_str()) {
+                is_url_only = true;
+                maybe_url = Some(u.to_string());
             }
-
-            let r = conn.execute(
-                "INSERT INTO scrapes (source, path, timestamp, scraper_id, status, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status) VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![source_host, local_path_s, ts, scraper, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status],
-            );
-            if let Err(e) = r {
-                return HttpResponse::InternalServerError()
-                    .json(serde_json::json!({"error": e.to_string()}));
-            }
-            HttpResponse::Accepted().json(serde_json::json!({"queued": path.to_string_lossy()}))
         }
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+    } else if let Ok(s) = std::str::from_utf8(&body) {
+        let s = s.trim();
+        if s.starts_with("http://") || s.starts_with("https://") {
+            is_url_only = true;
+            maybe_url = Some(s.to_string());
+        }
+    }
+
+    let scraper = scraper_id.unwrap();
+    let conn = state.db.lock().unwrap();
+
+    if is_url_only {
+        let qconn = state.queue_db.lock().unwrap();
+        let ts = Utc::now().timestamp();
+        let url = maybe_url.unwrap_or_default();
+
+        let exists: Result<i64, rusqlite::Error> = qconn.query_row(
+            "SELECT id FROM queue WHERE url = ?1 AND status IN ('queued','pending') LIMIT 1",
+            params![url],
+            |r| r.get(0),
+        );
+        match exists {
+            Ok(_) => {
+                HttpResponse::Ok().json(serde_json::json!({"queued": false, "reason": "duplicate"}))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                let res = qconn.execute(
+                    "INSERT INTO queue (url, source, scraper_id, timestamp, status) VALUES (?1, ?2, ?3, ?4, 'queued')",
+                    params![url, source_host, scraper, ts],
+                );
+                match res {
+                    Ok(_) => HttpResponse::Accepted().json(serde_json::json!({"queued": true})),
+                    Err(e) => HttpResponse::InternalServerError()
+                        .json(serde_json::json!({"error": e.to_string()})),
+                }
+            }
+            Err(e) => HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": e.to_string()})),
+        }
+    } else {
+        let domain_path =
+            domain_path_for_host(&source_host, state.ps_list.lock().unwrap().as_ref());
+        let ts_fs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut path = PathBuf::from(&state.config.hot_dir);
+        path.push(&domain_path);
+        let _ = fs::create_dir_all(&path);
+        path.push(format!("{}.bin", ts_fs));
+
+        match fs::write(&path, &body) {
+            Ok(_) => {
+                let local_path_s = path.to_string_lossy().to_string();
+                let ts = Utc::now().timestamp();
+
+                let mut title: Option<String> = None;
+                let mut canonical: Option<String> = None;
+                let mut outlinks_count: Option<i64> = None;
+                let mut lang: Option<String> = None;
+                let mut description: Option<String> = None;
+                let mut fetches: Option<i64> = Some(1);
+                let mut content_hash: Option<String> = None;
+                let mut http_status: Option<i64> = None;
+
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+                    if let Some(s) = v.get("title").and_then(|x| x.as_str()) {
+                        title = Some(s.to_string());
+                    }
+                    if let Some(s) = v.get("canonical").and_then(|x| x.as_str()) {
+                        canonical = Some(s.to_string());
+                    }
+                    if let Some(n) = v.get("outlinks_count").and_then(|x| x.as_i64()) {
+                        outlinks_count = Some(n);
+                    }
+                    if let Some(s) = v.get("lang").and_then(|x| x.as_str()) {
+                        lang = Some(s.to_string());
+                    }
+                    if let Some(s) = v.get("description").and_then(|x| x.as_str()) {
+                        description = Some(s.to_string());
+                    }
+                    if let Some(n) = v.get("fetches").and_then(|x| x.as_i64()) {
+                        fetches = Some(n);
+                    }
+                    if let Some(s) = v.get("content_hash").and_then(|x| x.as_str()) {
+                        content_hash = Some(s.to_string());
+                    }
+                    if let Some(n) = v.get("status").and_then(|x| x.as_i64()) {
+                        http_status = Some(n);
+                    }
+                }
+
+                let status_to_insert = "pending";
+
+                let r = conn.execute(
+                    "INSERT INTO scrapes (source, path, timestamp, scraper_id, status, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                    params![source_host, local_path_s, ts, scraper, status_to_insert, title, canonical, outlinks_count, lang, description, fetches, content_hash, http_status],
+                );
+                if let Err(e) = r {
+                    return HttpResponse::InternalServerError()
+                        .json(serde_json::json!({"error": e.to_string()}));
+                }
+                HttpResponse::Accepted().json(serde_json::json!({"queued": path.to_string_lossy()}))
+            }
+            Err(e) => HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": e.to_string()})),
         }
     }
 }
@@ -863,6 +952,30 @@ async fn scrapes_for_source_date(
 }
 
 async fn queue() -> impl Responder {
+    let qpath = PathBuf::from("data").join("scrape-queue.db");
+    if let Ok(conn) = Connection::open(&qpath) {
+        let mut stmt = match conn.prepare("SELECT id, url, source, timestamp, status FROM queue ORDER BY timestamp DESC LIMIT 100") {
+            Ok(s) => s,
+            Err(_) => return HttpResponse::Ok().json(SimpleList { items: vec![] }),
+        };
+        let rows = match stmt.query_map([], |row| {
+            Ok(format!(
+                "{}:{}",
+                row.get::<usize, String>(2).unwrap_or_default(),
+                row.get::<usize, String>(1)?
+            ))
+        }) {
+            Ok(r) => r,
+            Err(_) => return HttpResponse::Ok().json(SimpleList { items: vec![] }),
+        };
+        let mut items = Vec::new();
+        for r in rows {
+            if let Ok(s) = r {
+                items.push(s);
+            }
+        }
+        return HttpResponse::Ok().json(serde_json::json!({"items": items}));
+    }
     HttpResponse::Ok().json(SimpleList { items: vec![] })
 }
 
@@ -908,6 +1021,499 @@ async fn upload_queue(state: web::Data<AppState>) -> impl Responder {
     }
 
     HttpResponse::Ok().json(serde_json::json!({"pending": items}))
+}
+
+async fn queue_pending(
+    q: web::Query<HashMap<String, String>>,
+    state: web::Data<AppState>,
+) -> impl Responder {
+    let limit: i64 = q.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50);
+    let qconn = state.queue_db.lock().unwrap();
+    let mut stmt = match qconn.prepare("SELECT id, url, source, timestamp FROM queue WHERE status = 'queued' ORDER BY timestamp ASC LIMIT ?1") {
+        Ok(s) => s,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+    };
+    let rows = match stmt.query_map(params![limit], |row| {
+        Ok((
+            row.get::<usize, i64>(0)?,
+            row.get::<usize, String>(1)?,
+            row.get::<usize, String>(2)?,
+        ))
+    }) {
+        Ok(r) => r,
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"error": e.to_string()}));
+        }
+    };
+
+    let mut items = Vec::new();
+    for r in rows {
+        if let Ok((id, url, source)) = r {
+            items.push(serde_json::json!({"id": id, "source": source, "payload": {"url": url}}));
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"queued": items}))
+}
+
+async fn queue_stats(state: web::Data<AppState>) -> impl Responder {
+    let qconn = state.queue_db.lock().unwrap();
+
+    let total: i64 = match qconn.query_row(
+        "SELECT COUNT(*) FROM queue WHERE status = 'queued'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+
+    let unique_sources: i64 = match qconn.query_row(
+        "SELECT COUNT(DISTINCT source) FROM queue WHERE status = 'queued'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(n) => n,
+        Err(_) => 0,
+    };
+
+    let oldest: Option<i64> = match qconn.query_row(
+        "SELECT MIN(timestamp) FROM queue WHERE status = 'queued'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(v) => v,
+        Err(_) => None,
+    };
+
+    let newest: Option<i64> = match qconn.query_row(
+        "SELECT MAX(timestamp) FROM queue WHERE status = 'queued'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(v) => v,
+        Err(_) => None,
+    };
+
+    let mut top_sources: Vec<serde_json::Value> = Vec::new();
+    if let Ok(mut stmt) = qconn.prepare(
+        "SELECT source, COUNT(*) as c FROM queue WHERE status = 'queued' GROUP BY source ORDER BY c DESC LIMIT 20",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| Ok((row.get::<usize, String>(0)?, row.get::<usize, i64>(1)?))) {
+            for r in rows.flatten() {
+                top_sources.push(serde_json::json!({"source": r.0, "count": r.1}));
+            }
+        }
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "total_queued": total,
+        "unique_sources": unique_sources,
+        "oldest_timestamp": oldest,
+        "newest_timestamp": newest,
+        "top_sources": top_sources,
+    }))
+}
+
+#[derive(Deserialize)]
+struct AckRequest {
+    id: i64,
+}
+
+async fn queue_ack(body: web::Json<AckRequest>, state: web::Data<AppState>) -> impl Responder {
+    let _conn = state.db.lock().unwrap();
+
+    let qconn = state.queue_db.lock().unwrap();
+    match qconn.execute(
+        "UPDATE queue SET status = 'scraped' WHERE id = ?1",
+        params![body.id],
+    ) {
+        Ok(n) => {
+            if n > 0 {
+                return HttpResponse::Ok().json(serde_json::json!({"ack": body.id}));
+            }
+        }
+        Err(e) => {
+            eprintln!("queue ack error: {}", e);
+        }
+    }
+
+    let conn = state.db.lock().unwrap();
+    match conn.execute(
+        "UPDATE scrapes SET status = 'scraped' WHERE id = ?1",
+        params![body.id],
+    ) {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({"ack": body.id})),
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
+    }
+}
+
+async fn queue_submit(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    body: web::Bytes,
+) -> impl Responder {
+    let auth_hdr = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let token = auth_hdr.strip_prefix("Bearer ").unwrap_or("");
+    if token.is_empty() {
+        return HttpResponse::Unauthorized().json(Message {
+            message: "Missing Authorization",
+        });
+    }
+
+    let _ = ensure_auth_dbs();
+    let api_db = PathBuf::from("data").join("api_keys.db");
+    let scrapers_db = PathBuf::from("data").join("scrapers.db");
+
+    match Connection::open(&api_db) {
+        Ok(conn) => {
+            let mut stmt = match conn.prepare("SELECT 1 FROM api_keys WHERE api_key = ?1") {
+                Ok(s) => s,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            let mut rows = match stmt.query_map(params![token], |_row| Ok(1)) {
+                Ok(r) => r,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            if rows.next().is_none() {
+                return HttpResponse::Unauthorized().json(Message {
+                    message: "Invalid API key",
+                });
+            }
+        }
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(Message {
+                message: "Invalid API key",
+            });
+        }
+    }
+
+    let q_params: HashMap<String, String> = req
+        .query_string()
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            match (parts.next(), parts.next()) {
+                (Some(k), Some(v)) if !k.is_empty() => Some((k.to_string(), v.to_string())),
+                _ => None,
+            }
+        })
+        .collect();
+    let scraper_id = req
+        .headers()
+        .get("X-Scraper-Id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .or_else(|| q_params.get("scraper_id").cloned());
+
+    if let Some(id) = scraper_id.as_ref() {
+        match Connection::open(&scrapers_db) {
+            Ok(conn) => {
+                let row = conn.query_row(
+                    "SELECT api_key FROM scrapers WHERE id = ?1",
+                    params![id],
+                    |r| r.get::<usize, String>(0),
+                );
+                match row {
+                    Ok(owner_key) => {
+                        if owner_key != token {
+                            return HttpResponse::Unauthorized().json(Message {
+                                message: "Scraper id not assigned to API key",
+                            });
+                        }
+                    }
+                    Err(_) => {
+                        return HttpResponse::Unauthorized().json(Message {
+                            message: "Scraper id not found",
+                        });
+                    }
+                }
+            }
+            Err(_) => {
+                return HttpResponse::InternalServerError().json(Message {
+                    message: "auth DB error",
+                });
+            }
+        }
+    }
+
+    let mut url_s: Option<String> = None;
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+        if let Some(s) = v.get("url").and_then(|x| x.as_str()) {
+            url_s = Some(s.to_string());
+        }
+    }
+    if url_s.is_none() {
+        if let Ok(s) = std::str::from_utf8(&body) {
+            let s = s.trim();
+            if !s.is_empty() {
+                url_s = Some(s.to_string());
+            }
+        }
+    }
+    let url = match url_s {
+        Some(u) => u,
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({"error": "missing url"}));
+        }
+    };
+
+    let source_raw = q_params
+        .get("source")
+        .cloned()
+        .unwrap_or_else(|| "unknown".into());
+    let mut source_host = source_raw.clone();
+    if source_host.contains('/') {
+        if let Ok(u) = Url::parse(&source_host) {
+            if let Some(h) = u.host_str() {
+                source_host = h.to_string();
+            }
+        } else if let Ok(u) = Url::parse(&format!("https://{}", source_host)) {
+            if let Some(h) = u.host_str() {
+                source_host = h.to_string();
+            }
+        }
+    }
+
+    let ts = Utc::now().timestamp();
+
+    let qconn = state.queue_db.lock().unwrap();
+
+    let exists: Result<i64, rusqlite::Error> = qconn.query_row(
+        "SELECT id FROM queue WHERE url = ?1 AND status IN ('queued','pending') LIMIT 1",
+        params![url],
+        |r| r.get(0),
+    );
+    match exists {
+        Ok(_) => {
+            HttpResponse::Ok().json(serde_json::json!({"queued": false, "reason": "duplicate"}))
+        }
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            let res = qconn.execute(
+                "INSERT INTO queue (url, source, scraper_id, timestamp, status) VALUES (?1, ?2, ?3, ?4, 'queued')",
+                params![url, source_host, scraper_id, ts],
+            );
+            match res {
+                Ok(_) => HttpResponse::Accepted().json(serde_json::json!({"queued": true})),
+                Err(e) => HttpResponse::InternalServerError()
+                    .json(serde_json::json!({"error": e.to_string()})),
+            }
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
+    }
+}
+
+async fn queue_mega_submit(
+    req: HttpRequest,
+    state: web::Data<AppState>,
+    body: web::Bytes,
+) -> impl Responder {
+    let auth_hdr = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let token = auth_hdr.strip_prefix("Bearer ").unwrap_or("");
+    if token.is_empty() {
+        return HttpResponse::Unauthorized().json(Message {
+            message: "Missing Authorization",
+        });
+    }
+
+    let _ = ensure_auth_dbs();
+    let api_db = PathBuf::from("data").join("api_keys.db");
+    let scrapers_db = PathBuf::from("data").join("scrapers.db");
+
+    match Connection::open(&api_db) {
+        Ok(conn) => {
+            let mut stmt = match conn.prepare("SELECT 1 FROM api_keys WHERE api_key = ?1") {
+                Ok(s) => s,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            let mut rows = match stmt.query_map(params![token], |_row| Ok(1)) {
+                Ok(r) => r,
+                Err(_) => {
+                    return HttpResponse::Unauthorized().json(Message {
+                        message: "Invalid API key",
+                    });
+                }
+            };
+            if rows.next().is_none() {
+                return HttpResponse::Unauthorized().json(Message {
+                    message: "Invalid API key",
+                });
+            }
+        }
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(Message {
+                message: "Invalid API key",
+            });
+        }
+    }
+
+    let q_params: HashMap<String, String> = req
+        .query_string()
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            match (parts.next(), parts.next()) {
+                (Some(k), Some(v)) if !k.is_empty() => Some((k.to_string(), v.to_string())),
+                _ => None,
+            }
+        })
+        .collect();
+
+    let default_source = q_params
+        .get("source")
+        .cloned()
+        .unwrap_or_else(|| "unknown".into());
+
+    let mut items: Vec<(String, String, Option<String>)> = Vec::new();
+    if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&body) {
+        if v.is_array() {
+            for elt in v.as_array().unwrap() {
+                if let Some(s) = elt.as_str() {
+                    items.push((
+                        s.to_string(),
+                        default_source.clone(),
+                        q_params.get("scraper_id").cloned(),
+                    ));
+                } else if elt.is_object() {
+                    let url = elt
+                        .get("url")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string());
+                    let source = elt
+                        .get("source")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or(default_source.clone());
+                    let scraper_id = elt
+                        .get("scraper_id")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| q_params.get("scraper_id").cloned());
+                    if let Some(u) = url {
+                        items.push((u, source, scraper_id));
+                    }
+                }
+            }
+        } else if let Some(arr) = v.get("items").and_then(|x| x.as_array()) {
+            for elt in arr {
+                if let Some(s) = elt.as_str() {
+                    items.push((
+                        s.to_string(),
+                        default_source.clone(),
+                        q_params.get("scraper_id").cloned(),
+                    ));
+                } else if elt.is_object() {
+                    let url = elt
+                        .get("url")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string());
+                    let source = elt
+                        .get("source")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                        .unwrap_or(default_source.clone());
+                    let scraper_id = elt
+                        .get("scraper_id")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                        .or_else(|| q_params.get("scraper_id").cloned());
+                    if let Some(u) = url {
+                        items.push((u, source, scraper_id));
+                    }
+                }
+            }
+        }
+    }
+
+    if items.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"error": "no items to enqueue"}));
+    }
+    let ts = Utc::now().timestamp();
+    let received = items.len();
+    eprintln!(
+        "queue_mega_submit: received {} items (scraper_id={:?})",
+        received,
+        q_params.get("scraper_id")
+    );
+    let mut qconn = state.queue_db.lock().unwrap();
+    match qconn.transaction() {
+        Ok(tx) => {
+            let mut inserted = 0i64;
+            {
+                let mut check_stm = match tx.prepare("SELECT id FROM queue WHERE url = ?1 AND status IN ('queued','pending') LIMIT 1") {
+                    Ok(s) => s,
+                    Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+                };
+                let mut insert_stm = match tx.prepare("INSERT INTO queue (url, source, scraper_id, timestamp, status) VALUES (?1, ?2, ?3, ?4, 'queued')") {
+                    Ok(s) => s,
+                    Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+                };
+                for (url, source, scraper_id) in items.into_iter() {
+                    let exists = check_stm.query_row(params![url], |_r| _r.get::<usize, i64>(0));
+                    match exists {
+                        Ok(_) => {
+                            continue;
+                        }
+                        Err(rusqlite::Error::QueryReturnedNoRows) => {
+                            if let Err(e) = insert_stm.execute(params![url, source, scraper_id, ts])
+                            {
+                                eprintln!("queue mega insert error: {}", e);
+                            } else {
+                                inserted += 1;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("queue mega existence check error: {}", e);
+                        }
+                    }
+                }
+            }
+            if let Err(e) = tx.commit() {
+                return HttpResponse::InternalServerError()
+                    .json(serde_json::json!({"error": e.to_string()}));
+            }
+            eprintln!(
+                "queue_mega_submit: inserted {} of {} items",
+                inserted, received
+            );
+            let inserted_usize: usize = inserted.try_into().unwrap_or(0usize);
+            let skipped = received.saturating_sub(inserted_usize);
+            HttpResponse::Accepted().json(
+                serde_json::json!({"inserted": inserted, "received": received, "skipped": skipped}),
+            )
+        }
+        Err(e) => {
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()}))
+        }
+    }
 }
 
 async fn trusted_scrapers(_state: web::Data<AppState>) -> impl Responder {
@@ -1078,6 +1684,20 @@ async fn main() -> std::io::Result<()> {
         std::io::Error::new(std::io::ErrorKind::Other, "DB open failed")
     })?;
 
+    let queue_db_file =
+        std::env::var("QUEUE_DB_FILE").unwrap_or_else(|_| "data/scrape-queue.db".into());
+    if let Some(parent) = PathBuf::from(&queue_db_file).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let qconn = Connection::open(&queue_db_file).map_err(|e| {
+        eprintln!("Failed to open queue DB: {}", e);
+        std::io::Error::new(std::io::ErrorKind::Other, "queue DB open failed")
+    })?;
+
+    if let Err(e) = ensure_queue_schema(&qconn) {
+        eprintln!("failed to ensure queue schema: {}", e);
+    }
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS scrapers (
             id TEXT PRIMARY KEY,
@@ -1112,6 +1732,7 @@ async fn main() -> std::io::Result<()> {
     let state = AppState {
         config,
         db: Mutex::new(conn),
+        queue_db: Mutex::new(qconn),
         ps_list: Mutex::new(None),
     };
     let shared = web::Data::new(state);
@@ -1224,6 +1845,11 @@ async fn main() -> std::io::Result<()> {
                 web::get().to(scraper_assigned_sources),
             )
             .route("/upload/queue", web::get().to(upload_queue))
+            .route("/queue/pending", web::get().to(queue_pending))
+            .route("/queue/stats", web::get().to(queue_stats))
+            .route("/queue/ack", web::post().to(queue_ack))
+            .route("/queue/submit", web::patch().to(queue_submit))
+            .route("/queue/mega-submit", web::patch().to(queue_mega_submit))
     })
     .bind(&bind_addr)?
     .run()

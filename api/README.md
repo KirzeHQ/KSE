@@ -2,24 +2,6 @@
 
 This is the api for the project.
 
-## Endpoints
-
-- `POST /register`: Register a new scraper and receive an ID and API key.
-- `PATCH /submit`: Submit scraped data with scraper ID and API key.
-- `GET /search`: Search for data across all sources with query parameters.
-- `GET /sources`: List all sources being scraped.
-- `GET /scrapes`: List recent scrapes for a specific source.
-- `GET /scrapes/{source}`: Get all scrapes for a specific source.
-- `GET /scrapes/{source}/{date}`: Get scrapes for a specific source on a specific date.
-- `GET /queue`: Get the current scraping queue and assigned scrapers.
-- `GET /trusted-scrapers`: List all trusted scrapers and their assigned sources.
-- `GET /hot-storage`: List all data currently in hot storage.
-- `GET /cold-storage`: List all data currently in cold storage.
-- `GET /scraper/{id}/stats`: Get statistics about a specific scraper's performance and reliability.
-- `GET /scraper/{id}/history`: Get the history of scrapes submitted by a specific scraper.
-- `GET /scraper/{id}/trust-level`: Get the current trust level of a specific scraper
-- `GET /scraper/{id}/assigned-sources`: Get the list of sources currently assigned to a specific scraper.
-
 ## Authentication
 
 - Scrapers must include their API key in the `Authorization` header for all requests.
