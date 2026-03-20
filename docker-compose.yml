@@ -1,26 +1,21 @@
-version: '3.9'
-
 services:
-  db:
-    image: postgres:16
-    env_file:
-      - .env
-    ports:
-      - "${DB_PORT}:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
-
   web:
     build: .
-    command: bundle exec rails s -b 0.0.0.0
-    volumes:
-      - .:/app
+    command: bundle exec rails s -b 0.0.0.0 -p ${RAILS_PORT}
     ports:
-      - "${WEB_PORT}:3000"
-    env_file:
-      - .env
+      - "${RAILS_PORT}:${RAILS_PORT}"
+    environment:
+      RAILS_ENV: ${RAILS_ENV}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      DATABASE_URL: "postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
     depends_on:
       - db
 
-volumes:
-  db_data:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${DB_USERNAME}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "${DB_PORT}:${DB_PORT}"

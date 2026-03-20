@@ -29,5 +29,6 @@
 !/tmp/storage/.keep
 
 # Ignore key files for decrypting credentials and more.
-/config/*.key
+# Dont use them
+#/config/*.key
 
