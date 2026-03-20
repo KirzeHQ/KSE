@@ -8,5 +8,8 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "scripts": {
+    "start": "bun run index.js"
   }
 }
