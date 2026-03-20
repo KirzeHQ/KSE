@@ -1,15 +1,18 @@
 services:
   web:
     build: .
-    command: bundle exec rails s -b 0.0.0.0 -p ${RAILS_PORT}
+    command: bundle exec rails s -b 0.0.0.0 -p 3000
     ports:
-      - "${RAILS_PORT}:${RAILS_PORT}"
+      - "${RAILS_PORT}:3000"
     environment:
       RAILS_ENV: ${RAILS_ENV}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       DATABASE_URL: "postgresql://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"
     depends_on:
       - db
+    volumes:
+      - web_data:/app/tmp
+      - web_data:/app/log
 
   db:
     image: postgres:15
@@ -18,4 +21,25 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     ports:
-      - "${DB_PORT}:${DB_PORT}"
+      - "${DB_PORT}:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: ${WATCHTOWER_CONTAINER_NAME}
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      DOCKER_API_VERSION: ${DOCKER_API_VERSION}
+    command: >
+      sh -c 'if [ "${WATCHTOWER_ENABLED}" = "true" ]; then
+        /watchtower --interval 60;
+      else
+        echo "Watchtower disabled"; sleep infinity;
+      fi'
+
+volumes:
+  db_data:
+  web_data:
