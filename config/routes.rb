@@ -7,4 +7,19 @@ Rails.application.routes.draw do
 
   # Defines the root path route ("/")
   # root "posts#index"
+  namespace :api do
+    namespace :v1 do
+      scope :crawler, controller: "api/v1/crawler" do
+        post "next", action: "next"
+        patch ":id", action: "update"
+        post ":id/error", action: "error"
+      end
+
+      scope :indexer, controller: "api/v1/indexer" do
+        post "next", action: "next"
+        post ":id/result", action: "result"
+        post ":id/error", action: "error"
+      end
+    end
+  end
 end
