@@ -1,5 +1,7 @@
 class SearchController < ApplicationController
   def index
-    render :index, layout: false
+    respond_to do |format|
+      format.html { render :index }
+    end
   end
 end

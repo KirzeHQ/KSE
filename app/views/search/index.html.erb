@@ -7,6 +7,8 @@
     <%= render HeadingComponent.new(title: "Search", tone: :blue, size: :full) %>
     <%= render "search/nav" %>
 
+    <h1>Search</h1>
+
     <div class="search__bar">
         <%= form_with url: search_index_path, method: :get, local: true do |form| %>
             <%= form.text_field :query, placeholder: "Search for websites, users, and more...", class: "search__input" %>
