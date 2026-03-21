@@ -1,8 +1,8 @@
 class ApplicationController < ActionController::API
   # Policy Pundit
-  include Pundit::Authorization
-  include Pagy::Method
-  include ActionController::MimeResponds
+  # include Pundit::Authorization
+  # include Pagy::Method
+  # include ActionController::MimeResponds
 
   rescue_from StandardError, with: :handle_error
   rescue_from ActionController::InvalidAuthenticityToken, with: :handle_invalid_auth_token

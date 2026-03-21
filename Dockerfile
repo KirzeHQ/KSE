@@ -6,8 +6,8 @@ WORKDIR /app
 RUN apt-get update -qq && apt-get install -y \
     build-essential libpq-dev nodejs
 
-# Copy Gemfiles first (cache layer)
-# COPY Gemfile Gemfile.lock ./
+# Copy Gemfiles first
+COPY Gemfile ./
 
 # Install gems
 RUN bundle install

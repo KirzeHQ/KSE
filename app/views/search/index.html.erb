@@ -1,0 +1,19 @@
+<% content_for :title, "Search" %>
+<% content_for :og_title, "Search" %>
+<% content_for :og_description, "Discover websites and more! Using KSE" %>
+<% content_for :og_image, og_image_url('search', format: :png) %>
+
+<div class="explore" data-controller="load-more" data-load-more-url-value="<%= explore_index_path %>">
+    <%= render HeadingComponent.new(title: "Search", tone: :blue, size: :full) %>
+    <%= render "search/nav" %>
+
+    <div class="search__bar">
+        <%= form_with url: search_index_path, method: :get, local: true do |form| %>
+            <%= form.text_field :query, placeholder: "Search for websites, users, and more...", class: "search__input" %>
+            <%= form.submit "Search", class: "search__button" %>
+        <% end %>
+    </div>
+    <div class="search__results">
+        <%= render "search/results" %>
+    </div>
+</div>
