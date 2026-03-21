@@ -22,8 +22,13 @@ docker compose up -d
 
 3. Run database migrations:
 
+Dont do on production, dont be like me..
+
 ```bash
 docker compose exec web rails db:migrate
+
+# If docker not running:
+docker compose run web bin/rails db:migrate
 ```
 
 4. Access the application at `http://localhost:3000`

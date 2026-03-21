@@ -4,10 +4,12 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update -qq && apt-get install -y \
-    build-essential libpq-dev nodejs sqlite3
+    build-essential libpq-dev nodejs
 
 # Copy Gemfiles first (cache layer)
-COPY Gemfile Gemfile.lock ./
+# COPY Gemfile Gemfile.lock ./
+
+# Install gems
 RUN bundle install
 
 # Copy app code

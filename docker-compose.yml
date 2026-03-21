@@ -1,6 +1,7 @@
 services:
   web:
     build: .
+    env_file: .env
     command: bundle exec rails s -b 0.0.0.0 -p 3000
     ports:
       - "${RAILS_PORT}:3000"
@@ -16,6 +17,7 @@ services:
 
   db:
     image: postgres:15
+    env_file: .env
     environment:
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
