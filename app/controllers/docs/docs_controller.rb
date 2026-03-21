@@ -1,6 +1,6 @@
 class Api::V1::DocsController < Api::Base
   def index
-    spec = YAML.safe_load(File.read(Rails.root.join('docs', 'api.yaml')))
+    spec = YAML.safe_load(File.read(Rails.root.join("docs", "api.yaml")))
     escaped_spec_json = ERB::Util.json_escape(spec.to_json)
 
     render html: <<~HTML.html_safe
