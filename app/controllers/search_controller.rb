@@ -1,4 +1,4 @@
-class PagesController < ApplicationController
+class SearchController < ApplicationController
   def index
     render :index, layout: false
   end

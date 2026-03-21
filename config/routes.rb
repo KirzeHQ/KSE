@@ -6,7 +6,7 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
 
   # Defines the root path route ("/")
-  root to: "pages#index"
+  root to: "search#index"
   namespace :api do
     namespace :v1 do
       scope :crawler, controller: "api/v1/crawler" do
