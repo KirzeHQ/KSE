@@ -53,17 +53,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Cache dependencies
-        uses: actions/cache@v5
-        with:
-          path: |
-            vendor/bundle
-            ~/.npm
-            tmp/rubocop
-          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock','package-lock.json','**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-deps-
-
       - name: Install Sys Depends
         run: sudo apt-get update && sudo apt-get install -y libvips-dev libpq-dev
 
@@ -81,6 +70,17 @@ jobs:
 
       - name: Install JS dependencies
         run: npm ci
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            vendor/bundle
+            tmp/rubocop
+            **/node_modules
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock','package-lock.json','**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.run }}
