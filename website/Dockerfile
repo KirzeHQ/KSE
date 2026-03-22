@@ -1,16 +1,14 @@
-# Stage 1: Dev
-FROM node:20-alpine AS dev
-WORKDIR /app
-COPY . .
-RUN npm install -g live-server
-EXPOSE 8080
-CMD ["live-server", "--port=80", "--host=0.0.0.0", "--no-browser", "--watch=."]
+# Use a lightweight web server image
+FROM nginx:alpine
 
-# Stage 2: Production
-FROM nginx:alpine AS prod
-# Remove default nginx site
+# Remove default nginx website
 RUN rm -rf /usr/share/nginx/html/*
-# Copy static files
+
+# Copy website files into nginx
 COPY . /usr/share/nginx/html
+
+# Expose port 80
 EXPOSE 80
+
+# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

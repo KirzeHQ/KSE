@@ -21,7 +21,7 @@
       <p class="muted">Search is not ready yet.</p>
 
       <form id="search-form" class="search-bar" action="/search/" method="get">
-        <input id="search-input" name="se_id" type="text" placeholder="Enter query" aria-label="Search">
+        <input id="search-input" name="q" type="text" placeholder="Enter query" aria-label="Search">
         <button type="submit">Search</button>
       </form>
     </section>
@@ -40,29 +40,8 @@
       e.preventDefault();
       var q = document.getElementById('search-input').value.trim();
       if(!q) return;
-        // Send query to server to receive a se_id, then redirect to /search/?id={se_id}
-        var payload = { query: q };
-
-        var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-
-        var lookupUrl = apiBase ? apiBase.replace(/\/$/, '') + '/search/lookup' : '/search/lookup';
-
-        fetch(lookupUrl, {
-          method: 'POST',
-          mode: 'cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        }).then(function(res){
-          if(!res.ok) throw new Error('Lookup failed');
-          return res.json();
-        }).then(function(json){
-          var id = json && (json.id || json.se_id || json.search_id);
-          if(!id) throw new Error('Invalid response from server');
-          window.location.href = '/search/?id=' + encodeURIComponent(id);
-        }).catch(function(err){
-          console.error(err);
-          alert('Search currently unavailable please try again later.');
-        });
+      // Redirect to the client-driven search page with query param
+      window.location.href = '/search/?q=' + encodeURIComponent(q);
     });
   </script>
 </body>

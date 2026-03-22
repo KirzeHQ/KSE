@@ -17,7 +17,7 @@
   <main class="container">
     <section class="hero">
       <h2>Search results</h2>
-      <p class="muted">Results will appear below when the server has processed the search id.</p>
+      <p class="muted">Results will appear below. This page queries the API directly.</p>
     </section>
 
     <section id="result-area" class="results">
@@ -33,37 +33,58 @@
   <script>
     document.getElementById('year').textContent = new Date().getFullYear();
 
-    function getId() {
+    function getQuery() {
       var params = new URLSearchParams(window.location.search);
-      return params.get('id') || params.get('se_id') || '';
+      return params.get('q') || '';
     }
 
-    var id = getId();
+    var q = getQuery();
     var status = document.getElementById('status');
     var result = document.getElementById('result');
 
-    if (!id) {
-      status.textContent = 'No search id provided in the URL.';
+    if (!q) {
+      status.textContent = 'No query provided in the URL.';
     } else {
-      status.textContent = 'Looking up results for id: ' + id;
+      status.textContent = 'Searching for: ' + q;
 
-      // Try fetching server-provided JSON at API_BASE/search/result?id={id}
       var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-      var resultUrl = apiBase ? apiBase.replace(/\/$/, '') + '/search/result?id=' + encodeURIComponent(id) : '/search/result?id=' + encodeURIComponent(id);
+      var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
 
-      fetch(resultUrl, { cache: 'no-store', mode: 'cors' })
+      var headers = {};
+      // use stored secret if present (set by login flow elsewhere)
+      try {
+        var secret = localStorage.getItem('kse_secret');
+        if (secret) headers['Authorization'] = 'Bearer ' + secret;
+      } catch (e) {}
+
+      fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
         .then(function(res){
-          if (!res.ok) throw new Error('No result yet');
+          if (res.status === 429) throw new Error('Rate limited');
+          if (!res.ok) throw new Error('Search failed');
           return res.json();
         })
         .then(function(json){
           status.textContent = '';
-          var pre = document.createElement('pre');
-          pre.textContent = JSON.stringify(json, null, 2);
-          result.appendChild(pre);
+          if (!json.results || !json.results.length) {
+            result.textContent = 'No results';
+            return;
+          }
+
+          var ul = document.createElement('ul');
+          json.results.forEach(function(r){
+            var li = document.createElement('li');
+            if (r.type === 'account') {
+              li.textContent = '[Account] ' + r.email + ' — ' + (r.name || '');
+            } else {
+              li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r));
+            }
+            ul.appendChild(li);
+          });
+          result.appendChild(ul);
         })
-        .catch(function(){
-          status.textContent = 'Result not available yet. The server will render results once ready.';
+        .catch(function(err){
+          console.error(err);
+          status.textContent = 'Search unavailable: ' + err.message;
         });
     }
   </script>
