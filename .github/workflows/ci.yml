@@ -28,10 +28,11 @@ jobs:
           - name: Check for outdated dependencies
             needs_bundle: true
             run: bundle config unset deployment && bundle outdated --strict
-
-          - name: ERB Lint
-            needs_bundle: true
-            run: bundle exec erb_lint --lint-all
+          
+            # None Yet
+          #- name: ERB Lint
+          #  needs_bundle: true
+          #  run: bundle exec erb_lint --lint-all
 
           # None Yet  
           #- name: Prettier check - Ruby area
