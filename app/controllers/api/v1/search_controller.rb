@@ -19,12 +19,15 @@ class Api::V1::SearchController < Api::BaseController
     end
 
     if type.blank? || type == "jobs" || type == "all"
-      crawler_matches = CrawlerJob.where("url LIKE ?", "%#{q}%")
-      indexer_matches = IndexerJob.where("url LIKE ?", "%#{q}%")
-      combined = (crawler_matches.to_a + indexer_matches.to_a)
-      slice = combined.slice(offset, per) || []
-      slice.each do |j|
-        results << { type: j.class.name.underscore, id: j.id, url: j.url, state: j.state }
+      # use pg_search full text search on blobs (falls back to LIKE if Postgres not configured)
+      blobs = if SearchBlob.respond_to?(:full_text_search)
+        SearchBlob.full_text_search(q).limit(per).offset(offset)
+      else
+        SearchBlob.where("text_index LIKE ? OR key LIKE ?", "%#{q}%", "%#{q}%").limit(per).offset(offset)
+      end
+
+      blobs.each do |b|
+        results << { type: "blob", id: b.id, key: b.key, source: b.source, job_id: b.job_id, url: b.url, snippet: (b.text_index || "")[0..500] }
       end
     end
 

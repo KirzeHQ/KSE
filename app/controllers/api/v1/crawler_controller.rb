@@ -1,8 +1,4 @@
 class Api::V1::CrawlerController < Api::BaseController
-  require "fileutils"
-
-  TMP_DIR = Rails.root.join("tmp", "api", "crawler")
-
   # POST /api/v1/crawler/next
   def next
     worker = extract_worker
@@ -16,17 +12,28 @@ class Api::V1::CrawlerController < Api::BaseController
 
   # PATCH /api/v1/crawler/:id
   def update
-    ensure_tmp
-    payload = parse_json_or_params
-    File.write(TMP_DIR.join("#{params[:id]}-discovered.json"), JSON.pretty_generate(payload))
+    payload = request.raw_post.to_s
+
+    text_index = begin
+      JSON.pretty_generate(JSON.parse(payload))
+    rescue StandardError
+      payload.presence || params.to_unsafe_h.except(:controller, :action, :id).to_json
+    end
+
+    SearchBlob.create!(key: "crawler:#{params[:id]}:discovered", source: "crawler", job_id: params[:id].to_i, content_type: request.content_type, data: payload.b, text_index: text_index)
     render json: { ok: true }
   end
 
   # POST /api/v1/crawler/:id/error
   def error
-    ensure_tmp
-    payload = parse_json_or_params
-    File.write(TMP_DIR.join("#{params[:id]}-error.json"), JSON.pretty_generate(payload))
+    payload = request.raw_post.to_s
+    text_index = begin
+      JSON.pretty_generate(JSON.parse(payload))
+    rescue StandardError
+      payload.presence || params.to_unsafe_h.except(:controller, :action, :id).to_json
+    end
+
+    SearchBlob.create!(key: "crawler:#{params[:id]}:error", source: "crawler", job_id: params[:id].to_i, content_type: request.content_type, data: payload.b, text_index: text_index)
     render json: { ok: true }, status: :accepted
   end
 
@@ -41,7 +48,6 @@ class Api::V1::CrawlerController < Api::BaseController
   end
 
   def ensure_tmp
-    FileUtils.mkdir_p(TMP_DIR)
   end
 
   def parse_json_or_params
