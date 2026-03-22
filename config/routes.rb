@@ -17,6 +17,15 @@ Rails.application.routes.draw do
         post ":id/result", action: "result"
         post ":id/error", action: "error"
       end
+
+      scope :acc, controller: "api/v1/acc" do
+        post "login", action: "login"
+        post "register", action: "register"
+        post "resend_confirmation", action: "resend_confirmation"
+        post "confirm", action: "confirm"
+        delete "delete", action: "delete"
+        patch "edit", action: "edit"
+      end
     end
   end
 end
