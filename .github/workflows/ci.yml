@@ -71,12 +71,13 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: package.json
-          cache: 'npm'
+      
+      # None Yet
+      #- name: Set up Node.js
+      #  uses: actions/setup-node@v6
+      #  with:
+      #    node-version-file: package.json
+      #    cache: 'npm'
 
       - name: Install JS dependencies
         run: npm ci
