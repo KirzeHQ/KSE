@@ -24,16 +24,25 @@ jobs:
             run: detect-secrets scan --all-files
 
           - name: Check for common security misconfigurations
+            needs_bundle: true
             run: bundle exec rails_best_practices --only=security
 
           - name: Check for outdated dependencies
+            needs_bundle: true
             run: bundle outdated --strict
 
           - name: ERB Lint
+            needs_bundle: true
             run: bundle exec erb_lint --lint-all
 
-          - name: Prettier check
-            run: npx prettier --check "**/*.{js,jsx,css,scss,html}"
+          - name: Prettier check - Ruby area
+            run: npx prettier --check /app/**/*.{js,jsx,css,scss,html}"
+
+          - name: Prettier check - Indexer area
+            run: npx prettier --check /indexer/**/*.{js,jsx,css,scss,html}"
+
+          - name: Prettier check - Crawler area
+            run: npx prettier --check /crawler/**/*.{js,jsx,css,scss,html}"
 
           #- name: Check for vulnerable JavaScript dependencies
           #  run: npm audit --audit-level=high
@@ -53,12 +62,17 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Sys Depends
-        run: sudo apt-get update && sudo apt-get install -y libvips-dev libpq-dev
+        run: sudo apt-get update && sudo apt-get install -y libvips-dev libpq-dev libblas-dev liblapack-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
+          ruby-version: .ruby-version
           bundler-cache: true
+
+      - name: Bundle install
+        if: matrix.needs_bundle
+        run: bundle install --jobs 4 --retry 3
       
       # None Yet
       #- name: Set up Node.js
@@ -77,7 +91,7 @@ jobs:
             vendor/bundle
             tmp/rubocop
             **/node_modules
-          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock','package-lock.json','**/Cargo.lock') }}
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock') }}
           restore-keys: |
             ${{ runner.os }}-deps-
 
