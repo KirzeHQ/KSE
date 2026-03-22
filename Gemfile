@@ -48,9 +48,9 @@ group :development, :test do
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
 
-  # Lint ERB
-  gem "erb_lint", require: false
-
   # Check for for common security misconfigurations
   gem "rails_best_practices", require: false
 end
+
+# Lint ERB
+gem "erb_lint", require: false
