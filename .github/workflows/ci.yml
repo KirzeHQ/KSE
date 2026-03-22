@@ -5,24 +5,84 @@ on:
   push:
     branches: [ main ]
 
-jobs:
-  scan_ruby:
-    runs-on: ubuntu-latest
+permissions:
+  contents: read
+  checks: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Check for secrets in code
+            run: bin/secret_scanner
+
+          - name: Check for common security misconfigurations
+            run: bin/rails_best_practices --only=security
+
+
+          - name: ERB Lint
+            run: bundle exec erb_lint --lint-all
+
+          - name: Check for outdated dependencies
+            run: bin/bundle outdated --strict
+
+          - name: Prettier check
+            run: bin/prettier --check "**/*.{js,jsx,css,scss,html}"
+
+          - name: Check for vulnerable JavaScript dependencies
+            run: npm audit --audit-level=high
+
+          - name: Zeitwerk check
+            run: bin/rails zeitwerk:check
+
+          - name: Scan for common Rails security vulnerabilities using static analysis
+            run: bin/brakeman --no-pager
+      
+          - name: Scan for known security vulnerabilities in gems used
+            run: bin/bundler-audit
+      
+    name: ${{ matrix.name }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            vendor/bundle
+            ~/.npm
+            tmp/rubocop
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock','package-lock.json','**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
+      - name: Install Sys Depends
+        run: sudo apt-get update && sudo apt-get install -y libvips-dev libpq-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           bundler-cache: true
 
-      - name: Scan for common Rails security vulnerabilities using static analysis
-        run: bin/brakeman --no-pager
-      
-      - name: Scan for known security vulnerabilities in gems used
-        run: bin/bundler-audit
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+          cache: 'npm'
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Run ${{ matrix.name }}
+        run: ${{ matrix.run }}
       
   lint:
     runs-on: ubuntu-latest
@@ -31,6 +91,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Cache Ruby gems
+        uses: actions/cache@v5
+        with:
+          path: vendor/bundle
+          key: ${{ runner.os }}-gems-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-gems-
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
