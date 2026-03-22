@@ -41,6 +41,7 @@ Just to help, follow the development instructions below,
 but make sure to set up your database and environment variables correctly.  
 Also, make sure to have PostgreSQL installed and running on your machine.  
 I dont know how you would do that tho.  
+One more thing, i feel you, i hate docker, but just use it bro 😭
 
 ### Development
 
