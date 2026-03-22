@@ -44,6 +44,15 @@ jobs:
           - name: Prettier check - Crawler area
             run: npx prettier --check "crawler/**.{js,jsx,css,scss,html}"
 
+          - name: Auto-format JS/TS/CSS/HTML
+            if: github.event_name == 'push' && github.repository_owner == github.actor
+            run: |
+              npx prettier --write "indexer/**/*.{js,jsx,css,scss,html}"
+              npx prettier --write "crawler/**/*.{js,jsx,css,scss,html}"
+              git add .
+              git commit -m "chore: auto-format code with Prettier" || echo "No changes to commit"
+              git push
+
           #- name: Check for vulnerable JavaScript dependencies
           #  run: npm audit --audit-level=high
 
