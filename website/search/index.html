@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KSE Search</title>
+  <link rel="stylesheet" href="../styles.css">
+  <meta name="api-base" content="https://api.example.com">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">KSE</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h2>Search results</h2>
+      <p class="muted">Results will appear below when the server has processed the search id.</p>
+    </section>
+
+    <section id="result-area" class="results">
+      <div id="status" class="muted">Parsing URL...</div>
+      <div id="result" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© <span id="year"></span> KSE</div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    function getId() {
+      var params = new URLSearchParams(window.location.search);
+      return params.get('id') || params.get('se_id') || '';
+    }
+
+    var id = getId();
+    var status = document.getElementById('status');
+    var result = document.getElementById('result');
+
+    if (!id) {
+      status.textContent = 'No search id provided in the URL.';
+    } else {
+      status.textContent = 'Looking up results for id: ' + id;
+
+      // Try fetching server-provided JSON at API_BASE/search/result?id={id}
+      var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+      var resultUrl = apiBase ? apiBase.replace(/\/$/, '') + '/search/result?id=' + encodeURIComponent(id) : '/search/result?id=' + encodeURIComponent(id);
+
+      fetch(resultUrl, { cache: 'no-store', mode: 'cors' })
+        .then(function(res){
+          if (!res.ok) throw new Error('No result yet');
+          return res.json();
+        })
+        .then(function(json){
+          status.textContent = '';
+          var pre = document.createElement('pre');
+          pre.textContent = JSON.stringify(json, null, 2);
+          result.appendChild(pre);
+        })
+        .catch(function(){
+          status.textContent = 'Result not available yet. The server will render results once ready.';
+        });
+    }
+  </script>
+</body>
+</html>

@@ -25,13 +25,14 @@ docker compose up -d
 Dont do on production, dont be like me..
 
 ```bash
-docker compose exec web rails db:migrate
+docker compose exec api rails db:migrate
 
 # If docker not running:
-docker compose run web bin/rails db:migrate
+docker compose run api bin/rails db:migrate
 ```
 
-4. Access the application at `http://localhost:3000`
+4. Access the api at `http://localhost:3000`
+5. Access the website at `http://localhost:8080`
 
 ### Not Using Docker
 

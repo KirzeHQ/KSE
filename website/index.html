@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KSE Home</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="api-base" content="https://api.example.com">
+  <meta name="description" content="KSE">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <h1 class="logo">KSE</h1>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h2>Search</h2>
+      <p class="muted">Search is not ready yet.</p>
+
+      <form id="search-form" class="search-bar" action="/search/" method="get">
+        <input id="search-input" name="se_id" type="text" placeholder="Enter query" aria-label="Search">
+        <button type="submit">Search</button>
+      </form>
+    </section>
+
+    <!-- results will be rendered on the server-driven search page -->
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© <span id="year"></span> KSE</div>
+  </footer>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+
+    document.getElementById('search-form').addEventListener('submit', function(e){
+      e.preventDefault();
+      var q = document.getElementById('search-input').value.trim();
+      if(!q) return;
+        // Send query to server to receive a se_id, then redirect to /search/?id={se_id}
+        var payload = { query: q };
+
+        var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+
+        var lookupUrl = apiBase ? apiBase.replace(/\/$/, '') + '/search/lookup' : '/search/lookup';
+
+        fetch(lookupUrl, {
+          method: 'POST',
+          mode: 'cors',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(res){
+          if(!res.ok) throw new Error('Lookup failed');
+          return res.json();
+        }).then(function(json){
+          var id = json && (json.id || json.se_id || json.search_id);
+          if(!id) throw new Error('Invalid response from server');
+          window.location.href = '/search/?id=' + encodeURIComponent(id);
+        }).catch(function(err){
+          console.error(err);
+          alert('Search currently unavailable please try again later.');
+        });
+    });
+  </script>
+</body>

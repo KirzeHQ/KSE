@@ -1,5 +1,5 @@
 services:
-  web:
+  api:
     build: .
     env_file: .env
     command: bundle exec rails s -b 0.0.0.0 -p 3000
@@ -14,6 +14,24 @@ services:
     volumes:
       - web_data:/app/tmp
       - web_data:/app/log
+
+  web:
+    build:
+      context: ./website
+    env_file: .env
+    ports:
+      - "${WEB_PORT}:80"
+    restart: unless-stopped
+    volumes:
+      - ./website:/app  # for dev live reload
+    environment:
+      - MODE=${WEB_MODE}
+    command: >
+      sh -c "if [ \"$MODE\" = 'dev' ]; then
+               live-server --port=8080 --host=0.0.0.0 --no-browser --watch=.;
+             else
+               nginx -g 'daemon off;';
+             fi"
 
   db:
     image: postgres:15
