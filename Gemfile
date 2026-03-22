@@ -21,7 +21,7 @@ gem "pg_search", "~> 2.3"
 
 # Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
 gem "solid_cache"
-gem "solid_queue", "~> 1.3.2"
+gem "solid_queue", "~> 1.4.0"
 gem "solid_cable"
 
 # Reduces boot times through caching; required in config/boot.rb
