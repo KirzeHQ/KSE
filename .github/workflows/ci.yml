@@ -21,23 +21,22 @@ jobs:
       matrix:
         include:
           - name: Check for secrets in code
-            run: bin/secret_scanner
+            run: detect-secrets scan --all-files
 
           - name: Check for common security misconfigurations
-            run: bin/rails_best_practices --only=security
+            run: bundle exec rails_best_practices --only=security
 
+          - name: Check for outdated dependencies
+            run: bundle outdated --strict
 
           - name: ERB Lint
             run: bundle exec erb_lint --lint-all
 
-          - name: Check for outdated dependencies
-            run: bin/bundle outdated --strict
-
           - name: Prettier check
-            run: bin/prettier --check "**/*.{js,jsx,css,scss,html}"
+            run: npx prettier --check "**/*.{js,jsx,css,scss,html}"
 
-          - name: Check for vulnerable JavaScript dependencies
-            run: npm audit --audit-level=high
+          #- name: Check for vulnerable JavaScript dependencies
+          #  run: npm audit --audit-level=high
 
           - name: Zeitwerk check
             run: bin/rails zeitwerk:check

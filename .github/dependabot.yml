@@ -1,12 +1,28 @@
 version: 2
 updates:
-- package-ecosystem: bundler
-  directory: "/"
-  schedule:
-    interval: weekly
-  open-pull-requests-limit: 10
-- package-ecosystem: github-actions
-  directory: "/"
-  schedule:
-    interval: weekly
-  open-pull-requests-limit: 10
+  - package-ecosystem: bundler
+    directory: "/"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 20
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 20
+
+  - package-ecosystem: npm
+    directory: "/indexer"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 20
+
+  - package-ecosystem: npm
+    directory: "/crawler"
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 20
+
+commit-message:
+  prefix: "deps"
