@@ -7,7 +7,7 @@ class Api::V1::DocsController < Api::Base
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Flavortown API Reference</title>
+          <title>API Reference</title>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </head>
