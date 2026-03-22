@@ -15,6 +15,9 @@ gem "bcrypt", "~> 3.1.18"
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]
 
+# Rate limiting
+gem "rack-attack", "~> 6.5"
+
 # Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
 gem "solid_cache"
 gem "solid_queue", "~> 1.3.2"

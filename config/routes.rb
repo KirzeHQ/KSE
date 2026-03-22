@@ -26,6 +26,10 @@ Rails.application.routes.draw do
         delete "delete", action: "delete"
         patch "edit", action: "edit"
       end
+
+      scope :search, controller: "api/v1/search" do
+        get "", action: "index"
+      end
     end
   end
 end
