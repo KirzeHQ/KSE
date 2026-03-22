@@ -1,4 +1,4 @@
-class Api::V1::DocsController < Api::Base
+class Api::V1::DocsController < Api::BaseController
   def index
     spec = YAML.safe_load(File.read(Rails.root.join("docs", "api.yaml")))
     escaped_spec_json = ERB::Util.json_escape(spec.to_json)
