@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KSE Dashboard</title>
+  <link rel="stylesheet" href="/style.css">
+  <meta name="api-base" content="https://api.example.com">
+</head>
+<body>
+  <div id="site-header"></div>
+
+  <main class="container">
+    <section class="hero">
+      <h2>Dashboard</h2>
+      <div id="content" class="muted">Loading...</div>
+    </section>
+  </main>
+
+  <div id="site-footer"></div>
+  <script src="/js/site_layout.js"></script>
+
+  <script>
+    // redirect to login if not authenticated
+    var secret = null;
+    try { secret = localStorage.getItem('kse_secret'); } catch(e){}
+    if(!secret) {
+      var next = encodeURIComponent('/acc/dashboard/');
+      window.location.replace('/acc/login/?next=' + next);
+    }
+
+    document.getElementById('site-year')?.textContent = new Date().getFullYear();
+    var content = document.getElementById('content');
+    if(secret){
+      content.textContent = 'You are logged in. This is a skeleton dashboard.';
+      var btn = document.createElement('button'); btn.textContent = 'Logout'; btn.className='btn-ghost'; btn.style.display='block'; btn.style.marginTop='12px';
+      btn.addEventListener('click', function(){ try { localStorage.removeItem('kse_secret'); } catch(e){}; window.location.href = '/'; });
+      content.appendChild(btn);
+    }
+  </script>
+</body>
+</html>

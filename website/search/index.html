@@ -4,15 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>KSE Search</title>
-  <link rel="stylesheet" href="../styles.css">
+  <link rel="stylesheet" href="../style.css">
   <meta name="api-base" content="https://api.example.com">
 </head>
 <body>
-  <header class="site-header">
-    <div class="container">
-      <h1 class="logo">KSE</h1>
-    </div>
-  </header>
+  <div id="site-header"></div>
 
   <main class="container">
     <section class="hero">
@@ -24,69 +20,49 @@
       <div id="status" class="muted">Parsing URL...</div>
       <div id="result" aria-live="polite"></div>
     </section>
-  </main>
+    <div id="site-header"></div>
 
-  <footer class="site-footer">
-    <div class="container">© <span id="year"></span> KSE</div>
-  </footer>
+    <div id="site-footer"></div>
+    <script src="/js/site_layout.js"></script>
+    <script>
+      function getQuery() {
+        var params = new URLSearchParams(window.location.search);
+        return params.get('q') || '';
+      }
 
-  <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
+      var q = getQuery();
+      var status = document.getElementById('status');
+      var result = document.getElementById('result');
 
-    function getQuery() {
-      var params = new URLSearchParams(window.location.search);
-      return params.get('q') || '';
-    }
+      if (!q) {
+        status.textContent = 'No query provided in the URL.';
+      } else {
+        status.textContent = 'Searching for: ' + q;
 
-    var q = getQuery();
-    var status = document.getElementById('status');
-    var result = document.getElementById('result');
+        var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+        var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
 
-    if (!q) {
-      status.textContent = 'No query provided in the URL.';
-    } else {
-      status.textContent = 'Searching for: ' + q;
+        var headers = {};
+        try { var secret = localStorage.getItem('kse_secret'); if (secret) headers['Authorization'] = 'Bearer ' + secret; } catch (e) {}
 
-      var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-      var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
-
-      var headers = {};
-      // use stored secret if present (set by login flow elsewhere)
-      try {
-        var secret = localStorage.getItem('kse_secret');
-        if (secret) headers['Authorization'] = 'Bearer ' + secret;
-      } catch (e) {}
-
-      fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
-        .then(function(res){
-          if (res.status === 429) throw new Error('Rate limited');
-          if (!res.ok) throw new Error('Search failed');
-          return res.json();
-        })
-        .then(function(json){
-          status.textContent = '';
-          if (!json.results || !json.results.length) {
-            result.textContent = 'No results';
-            return;
-          }
-
-          var ul = document.createElement('ul');
-          json.results.forEach(function(r){
-            var li = document.createElement('li');
-            if (r.type === 'account') {
-              li.textContent = '[Account] ' + r.email + ' — ' + (r.name || '');
-            } else {
-              li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r));
-            }
-            ul.appendChild(li);
-          });
-          result.appendChild(ul);
-        })
-        .catch(function(err){
-          console.error(err);
-          status.textContent = 'Search unavailable: ' + err.message;
-        });
-    }
-  </script>
-</body>
-</html>
+        fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
+          .then(function(res){
+            if (res.status === 429) throw new Error('Rate limited');
+            if (!res.ok) throw new Error('Search failed');
+            return res.json();
+          })
+          .then(function(json){
+            status.textContent = '';
+            if (!json.results || !json.results.length) { result.textContent = 'No results'; return; }
+            var ul = document.createElement('ul');
+            json.results.forEach(function(r){
+              var li = document.createElement('li');
+              if (r.type === 'account') { li.textContent = '[Account] ' + r.email + ' — ' + (r.name || ''); }
+              else { li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r)); }
+              ul.appendChild(li);
+            });
+            result.appendChild(ul);
+          })
+          .catch(function(err){ console.error(err); status.textContent = 'Search unavailable: ' + err.message; });
+      }
+    </script>

@@ -4,16 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>KSE Home</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="style.css">
   <meta name="api-base" content="https://api.example.com">
   <meta name="description" content="KSE">
 </head>
 <body>
-  <header class="site-header">
-    <div class="container">
-      <h1 class="logo">KSE</h1>
-    </div>
-  </header>
+  <div id="site-header"></div>
 
   <main class="container">
     <section class="hero">
@@ -24,23 +20,20 @@
         <input id="search-input" name="q" type="text" placeholder="Enter query" aria-label="Search">
         <button type="submit">Search</button>
       </form>
+      <p style="margin-top:12px">New here? <a href="/acc/register/">Create an account</a></p>
     </section>
 
     <!-- results will be rendered on the server-driven search page -->
   </main>
 
-  <footer class="site-footer">
-    <div class="container">© <span id="year"></span> KSE</div>
-  </footer>
+  <div id="site-footer"></div>
 
+  <script src="/js/site_layout.js"></script>
   <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
-
     document.getElementById('search-form').addEventListener('submit', function(e){
       e.preventDefault();
       var q = document.getElementById('search-input').value.trim();
       if(!q) return;
-      // Redirect to the client-driven search page with query param
       window.location.href = '/search/?q=' + encodeURIComponent(q);
     });
   </script>

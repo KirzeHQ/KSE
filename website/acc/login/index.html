@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KSE Login</title>
+  <link rel="stylesheet" href="/style.css">
+  <meta name="api-base" content="https://api.example.com">
+</head>
+<body>
+  <div id="site-header"></div>
+
+  <main class="container auth-page">
+    <section class="hero">
+      <h2>Log in</h2>
+      <p class="muted">Enter your credentials to get a secret stored in your browser.</p>
+
+      <div class="card auth-card">
+        <form id="login-form" class="auth-form" action="#" method="post">
+          <input id="email" name="email" type="email" placeholder="you@example.com" required>
+          <input id="password" name="password" type="password" placeholder="Password" required>
+          <button type="submit" class="btn-primary">Log in</button>
+        </form>
+
+        <div id="message" class="muted" aria-live="polite"></div>
+        <p style="margin-top:10px">New? (why the long wait?) <a href="/acc/register/">Create account</a></p>
+      </div>
+
+      <div class="card social-card" aria-hidden="false">
+        <div class="muted">Or continue with</div>
+        <div class="social-grid">
+          <a id="github-login" class="btn-social-icon btn-github" href="#" aria-label="Continue with GitHub" rel="nofollow">
+            <img src="/assets/github.svg" class="icon" alt="">
+          </a>
+          <a id="google-login" class="btn-social-icon btn-google" href="#" aria-label="Continue with Google" rel="nofollow">
+            <img src="/assets/google.svg" class="icon" alt="">
+          </a>
+          <a id="hackclub-login" class="btn-social-icon btn-hackclub" href="#" aria-label="Continue with Hack Club" rel="nofollow">
+            <img src="/assets/hackclub.svg" class="icon" alt="">
+          </a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="site-footer"></div>
+  <script src="/js/site_layout.js"></script>
+
+  <script>
+    document.getElementById('year').textContent = new Date().getFullYear();
+    try{
+      var apiBaseForSocial = document.querySelector('meta[name="api-base"]')?.content || '';
+      var baseHref = apiBaseForSocial ? apiBaseForSocial.replace(/\/$/, '') : '';
+      var ghHref = baseHref ? baseHref + '/api/v1/acc/oauth/github' : '/api/v1/acc/oauth/github';
+      var googleHref = baseHref ? baseHref + '/api/v1/acc/oauth/google' : '/api/v1/acc/oauth/google';
+      var hackHref = baseHref ? baseHref + '/api/v1/acc/oauth/hack_club' : '/api/v1/acc/oauth/hack_club';
+      var ghBtn = document.getElementById('github-login'); if(ghBtn) ghBtn.href = ghHref;
+      var gBtn = document.getElementById('google-login'); if(gBtn) gBtn.href = googleHref;
+      var hBtn = document.getElementById('hackclub-login'); if(hBtn) hBtn.href = hackHref;
+    }catch(e){}
+    var form = document.getElementById('login-form');
+    var msg = document.getElementById('message');
+
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      msg.textContent = '';
+      var email = document.getElementById('email').value.trim();
+      var password = document.getElementById('password').value;
+      if(!email || !password) { msg.textContent = 'Email and password are required'; return; }
+
+      var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+      var url = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/acc/login' : '/api/v1/acc/login';
+
+      fetch(url, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, password: password })
+      }).then(function(res){
+        if(!res.ok) return res.json().then(function(j){ throw new Error((j && j.error) || 'Login failed'); });
+        return res.json();
+      }).then(function(json){
+        try { localStorage.setItem('kse_secret', json.secret); } catch(e){}
+        msg.textContent = 'Login successful. Redirecting to dashboard...';
+        setTimeout(function(){ window.location.href = '/acc/dashboard/'; }, 600);
+      }).catch(function(err){
+        console.error(err);
+        msg.textContent = 'Login error: ' + err.message;
+      });
+    });
+  </script>
+</body>
+</html>
