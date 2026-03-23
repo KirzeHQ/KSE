@@ -25,9 +25,10 @@ jobs:
             needs_bundle: true
             run: bundle exec rails_best_practices --only=security
 
-          - name: Check for outdated dependencies
-            needs_bundle: true
-            run: bundle config unset deployment && bundle outdated --strict
+          # Dependabot exists  
+          #- name: Check for outdated dependencies
+          #  needs_bundle: true
+          #  run: bundle config unset deployment && bundle outdated --strict
           
             # None Yet
           #- name: ERB Lint
