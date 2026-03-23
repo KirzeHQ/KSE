@@ -1,6 +1,6 @@
 import { parse } from "node-html-parser";
 
-const API_BASE = process.env.API_BASE || "http://localhost:3000";
+const API_BASE = process.env.API_BASE || "http://localhost:3000/api/v1";
 const API_KEY = process.env.API_KEY || "";
 const POLL_INTERVAL = Number(process.env.POLL_INTERVAL_MS || 3000);
 const CONCURRENCY = Number(process.env.CONCURRENCY || 8);
