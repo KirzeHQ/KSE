@@ -1,4 +1,3 @@
 #!/bin/bash
-
-# Start website
-python3 -m http.server --directory website 8080 &
+python3 -m http.server 8080 -d ./website
+exit

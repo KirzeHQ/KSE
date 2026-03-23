@@ -6,19 +6,19 @@ Rails.application.routes.draw do
   get "up" => "rails/health#show", as: :rails_health_check
   namespace :api do
     namespace :v1 do
-      scope :crawler, controller: "api/v1/crawler" do
+      namespace :crawler do
         post "next", action: "next"
         patch ":id", action: "update"
         post ":id/error", action: "error"
       end
 
-      scope :indexer, controller: "api/v1/indexer" do
+      namespace :indexer do
         post "next", action: "next"
         post ":id/result", action: "result"
         post ":id/error", action: "error"
       end
 
-      scope :acc, controller: "api/v1/acc" do
+      namespace :acc do
         post "login", action: "login"
         post "register", action: "register"
         post "resend_confirmation", action: "resend_confirmation"
@@ -27,7 +27,12 @@ Rails.application.routes.draw do
         patch "edit", action: "edit"
       end
 
-      scope :search, controller: "api/v1/search" do
+      namespace :oauth do
+        get "github", action: "github"
+        get "github/callback", action: "github_callback"
+      end
+
+      namespace :search do
         get "", action: "index"
       end
     end

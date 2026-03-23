@@ -19,7 +19,13 @@ docker compose build
 docker compose up -d
 ```
 
-3. Run database migrations:
+3. Start the web container:
+
+```bash
+docker compose -f docker-compose.web.yml up -d
+```
+
+4. Run database migrations:
 
 Dont do on production, dont be like me..
 
@@ -30,40 +36,17 @@ docker compose exec api rails db:migrate
 docker compose run api bin/rails db:migrate
 ```
 
-4. Access the api at `http://localhost:3000`
-5. Access the website at `http://localhost:8080`
+5.  
+Access the api at `http://localhost:3000`  
+Access the website at `http://localhost:8080`  
 
 ### Not Using Docker
 
-Goodluck man, its all you on this,  
-Just to help, follow the development instructions below,  
-but make sure to set up your database and environment variables correctly.  
-Also, make sure to have PostgreSQL installed and running on your machine.  
-I dont know how you would do that tho.  
-One more thing, i feel you, i hate docker, but just use it bro 😭
+😭😭😭😭
 
 ### Development
 
-1. Install dependencies:
-
-```bash
-bundle install
-```
-
-2. Set up the database:
-
-```bash
-rails db:create && rails db:migrate
-```
-
-3. Start the Rails server:
-
-```bash
-rails server
-```
-
-### Development with Docker
-
+Run:
 ```
 docker compose -f docker-compose.dev.yml up -d
 ```
