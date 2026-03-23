@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>KSE Register</title>
   <link rel="stylesheet" href="/style.css">
-  <meta name="api-base" content="https://api.example.com">
 </head>
 <body>
   <div id="site-header"></div>
@@ -48,12 +47,8 @@
   <script src="/js/site_layout.js"></script>
 
   <script>
-    document.getElementById('year').textContent = new Date().getFullYear();
-    try{
-      var apiBaseForSocial = document.querySelector('meta[name="api-base"]')?.content || '';
-      var ghHref = apiBaseForSocial ? apiBaseForSocial.replace(/\/$/, '') + '/api/v1/acc/oauth/github' : '/api/v1/acc/oauth/github';
-      var ghBtn = document.getElementById('github-login'); if(ghBtn) ghBtn.href = ghHref;
-    }catch(e){}
+
+    function setSocialHrefs(){
       try{
         var apiBaseForSocial = document.querySelector('meta[name="api-base"]')?.content || '';
         var baseHref = apiBaseForSocial ? apiBaseForSocial.replace(/\/$/, '') : '';
@@ -64,10 +59,15 @@
         var gBtn = document.getElementById('google-login'); if(gBtn) gBtn.href = googleHref;
         var hBtn = document.getElementById('hackclub-login'); if(hBtn) hBtn.href = hackHref;
       }catch(e){}
-      var form = document.getElementById('register-form');
+    }
+
+    if(document.querySelector('meta[name="api-base"]')?.content){ setSocialHrefs(); }
+    else if(window.KSE && window.KSE.fragmentsReady){ window.KSE.fragmentsReady.then(setSocialHrefs); }
+
+    var form = document.getElementById('register-form');
     var msg = document.getElementById('message');
 
-    form.addEventListener('submit', function(e){
+    form.addEventListener('submit', async function(e){
       e.preventDefault();
       msg.textContent = '';
       var name = document.getElementById('name').value.trim();
@@ -76,24 +76,17 @@
       if(!email || !password) { msg.textContent = 'Email and password are required'; return; }
 
       var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+      if(!apiBase && window.KSE && window.KSE.fragmentsReady){ await window.KSE.fragmentsReady; apiBase = document.querySelector('meta[name="api-base"]')?.content || ''; }
       var url = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/acc/register' : '/api/v1/acc/register';
 
-      fetch(url, {
-        method: 'POST',
-        mode: 'cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name, email: email, password: password })
-      }).then(function(res){
-        if(!res.ok) return res.json().then(function(j){ throw new Error((j && j.error) || 'Registration failed'); });
-        return res.json();
-      }).then(function(json){
+      try{
+        var res = await fetch(url, { method: 'POST', mode: 'cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, email: email, password: password }) });
+        if(!res.ok) { var j = await res.json().catch(function(){return {error: 'Registration failed'}}); throw new Error((j && j.error) || 'Registration failed'); }
+        var json = await res.json();
         try { localStorage.setItem('kse_secret', json.secret); } catch(e){}
         msg.textContent = 'Registration successful — confirmation email sent.';
         setTimeout(function(){ window.location.href = '/acc/dashboard/'; }, 900);
-      }).catch(function(err){
-        console.error(err);
-        msg.textContent = 'Registration error: ' + err.message;
-      });
+      }catch(functionErr){ console.error(functionErr); msg.textContent = 'Registration error: ' + functionErr.message; }
     });
   </script>
 </body>

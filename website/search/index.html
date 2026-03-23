@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>KSE Search</title>
   <link rel="stylesheet" href="../style.css">
-  <meta name="api-base" content="https://api.example.com">
 </head>
 <body>
   <div id="site-header"></div>
@@ -40,29 +39,40 @@
         status.textContent = 'Searching for: ' + q;
 
         var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-        var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
+        if(!apiBase && window.KSE && window.KSE.fragmentsReady){
+          window.KSE.fragmentsReady.then(function(){
+            apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+            var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
+            doFetch(searchUrl);
+          });
+        } else {
+          var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
+          doFetch(searchUrl);
+        }
 
-        var headers = {};
-        try { var secret = localStorage.getItem('kse_secret'); if (secret) headers['Authorization'] = 'Bearer ' + secret; } catch (e) {}
+        function doFetch(searchUrl){
+          var headers = {};
+          try { var secret = localStorage.getItem('kse_secret'); if (secret) headers['Authorization'] = 'Bearer ' + secret; } catch (e) {}
 
-        fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
-          .then(function(res){
-            if (res.status === 429) throw new Error('Rate limited');
-            if (!res.ok) throw new Error('Search failed');
-            return res.json();
-          })
-          .then(function(json){
-            status.textContent = '';
-            if (!json.results || !json.results.length) { result.textContent = 'No results'; return; }
-            var ul = document.createElement('ul');
-            json.results.forEach(function(r){
-              var li = document.createElement('li');
-              if (r.type === 'account') { li.textContent = '[Account] ' + r.email + ' — ' + (r.name || ''); }
-              else { li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r)); }
-              ul.appendChild(li);
-            });
-            result.appendChild(ul);
-          })
-          .catch(function(err){ console.error(err); status.textContent = 'Search unavailable: ' + err.message; });
+          fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
+            .then(function(res){
+              if (res.status === 429) throw new Error('Rate limited');
+              if (!res.ok) throw new Error('Search failed');
+              return res.json();
+            })
+            .then(function(json){
+              status.textContent = '';
+              if (!json.results || !json.results.length) { result.textContent = 'No results'; return; }
+              var ul = document.createElement('ul');
+              json.results.forEach(function(r){
+                var li = document.createElement('li');
+                if (r.type === 'account') { li.textContent = '[Account] ' + r.email + ' — ' + (r.name || ''); }
+                else { li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r)); }
+                ul.appendChild(li);
+              });
+              result.appendChild(ul);
+            })
+            .catch(function(err){ console.error(err); status.textContent = 'Search unavailable: ' + err.message; });
+        }
       }
     </script>

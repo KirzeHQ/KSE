@@ -1,4 +1,5 @@
-(async function(){
+window.KSE = window.KSE || {};
+window.KSE.fragmentsReady = (async function(){
   // determine base path relative to this script
   var script = document.currentScript || (function(){var s=document.getElementsByTagName('script'); return s[s.length-1];})();
   var scriptSrc = script && script.src ? script.src : '';
@@ -22,6 +23,20 @@
 
   await loadFragment('header.html', 'site-header', 'header');
   await loadFragment('footer.html', 'site-footer', 'footer');
+
+  try{
+    var headerMeta = document.querySelector('header.site-header meta[name="api-base"]');
+    if(headerMeta){
+      var headMeta = document.querySelector('meta[name="api-base"]');
+      if(!headMeta){
+        headMeta = document.createElement('meta');
+        headMeta.setAttribute('name', 'api-base');
+        document.head.appendChild(headMeta);
+      }
+      headMeta.setAttribute('content', headerMeta.getAttribute('content') || '');
+    }
+    window.KSE.apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+  }catch(e){ console.error('copyApiBaseMeta', e); }
 
   try{ var y = document.getElementById('site-year'); if(y) y.textContent = new Date().getFullYear(); }catch(e){}
 
@@ -51,4 +66,6 @@
       }
     }catch(e){}
   }catch(e){ console.error(e); }
+
+  return true;
 })();
