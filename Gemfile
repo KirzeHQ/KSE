@@ -58,3 +58,8 @@ end
 
 # Lint ERB
 gem "erb_lint", require: false
+
+# Error reporting
+gem "sentry-rails"
+
+gem "query_count"
