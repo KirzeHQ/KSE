@@ -1,4 +1,4 @@
-FROM ruby:3.4
+FROM ruby:3.4.2
 
 WORKDIR /app
 
@@ -7,7 +7,7 @@ RUN apt-get update -qq && apt-get install -y \
     build-essential libpq-dev nodejs
 
 # Copy Gemfiles first
-COPY Gemfile ./
+COPY Gemfile Gemfile.lock ./
 
 # Install gems
 RUN bundle install

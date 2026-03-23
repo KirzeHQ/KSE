@@ -62,3 +62,12 @@ rails db:create && rails db:migrate
 ```bash
 rails server
 ```
+
+### Development with Docker
+
+```
+docker compose -f docker-compose.dev.yml up -d
+```
+thats it, the development environment will be up and running.  
+Access the api at `http://localhost:3000`  
+Access the website at `http://localhost:80`
