@@ -68,6 +68,12 @@ rails server
 ```
 docker compose -f docker-compose.dev.yml up -d
 ```
+
+website:
+```
+./dev.sh
+```
+
 thats it, the development environment will be up and running.  
 Access the api at `http://localhost:3000`  
-Access the website at `http://localhost:80`
+Access the website at `http://localhost:8080`

@@ -26,12 +26,8 @@ services:
       - "${DB_PORT}:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-  web:
-    build:
-      context: ./
-    ports:
-      - "80:80"
-    restart: unless-stopped
+
+  # Website is served separately in development for hot-reloading and easier debugging
 
   watchtower:
     image: containrrr/watchtower
