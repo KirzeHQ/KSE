@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KSE Confirm</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="site-header"></div>
+
+  <main class="container auth-page">
+    <section class="hero">
+      <h2>Email confirmation</h2>
+      <div id="message" class="muted">Checking token...</div>
+    </section>
+  </main>
+
+  <div id="site-footer"></div>
+  <script src="/js/site_layout.js"></script>
+  <script>
+    async function doConfirm(){
+      var params = new URLSearchParams(window.location.search);
+      var token = params.get('token') || '';
+      var msgEl = document.getElementById('message');
+      if(!token){ msgEl.textContent = 'Missing token.'; return; }
+      msgEl.textContent = 'Confirming...';
+      try{
+        var res = await fetch('/api/v1/acc/confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }) });
+        if(res.ok){ msgEl.textContent = 'Email confirmed. You can now log in.'; }
+        else { var j = await res.json().catch(()=>({error:'Confirmation failed'})); msgEl.textContent = 'Confirmation failed: ' + (j.error || res.statusText); }
+      }catch(e){ msgEl.textContent = 'Confirmation error: ' + e.message; }
+    }
+
+    if(window.KSE && window.KSE.fragmentsReady){ window.KSE.fragmentsReady.then(doConfirm); }
+    else doConfirm();
+  </script>
+</body>
+</html>

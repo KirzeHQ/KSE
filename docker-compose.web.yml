@@ -1,7 +1,0 @@
-services:
-  web:
-    build:
-      context: ./website
-    ports:
-      - "80:80"
-    restart: unless-stopped

@@ -19,13 +19,7 @@ docker compose build
 docker compose up -d
 ```
 
-3. Start the web container:
-
-```bash
-docker compose -f docker-compose.web.yml up -d
-```
-
-4. Run database migrations:
+3. Run database migrations:
 
 Dont do on production, dont be like me..
 
@@ -36,26 +30,32 @@ docker compose exec api rails db:migrate
 docker compose run api bin/rails db:migrate
 ```
 
-5.  
-  Access the api at `http://localhost:3000`  
-  Access the website at `http://localhost:8080`  
+4. Access at `http://localhost:3000` (or your server's IP/domain)
 
 ### Not Using Docker
 
-😭😭😭😭
+😭😭😭😭   
+(someone please make a non-docker deployment guide 😭)
 
 ### Development
 
 Run:
 ```
-docker compose -f docker-compose.dev.yml up -d
-```
-
-website:
-```
-./dev.sh
+docker compose up -d
 ```
 
 thats it, the development environment will be up and running.  
-Access the api at `http://localhost:3000`  
-Access the website at `http://localhost:8080`
+Access at `http://localhost:3000`
+
+### Random Useful Commands
+
+```bash
+# Clear containers, volumes, and images (be careful with this one!)
+docker compose down -v --rmi all
+
+# Migrate db
+docker compose exec api rails db:migrate
+
+# Run a Rails console
+docker compose exec api rails console
+```
