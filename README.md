@@ -37,8 +37,8 @@ docker compose run api bin/rails db:migrate
 ```
 
 5.  
-Access the api at `http://localhost:3000`  
-Access the website at `http://localhost:8080`  
+  Access the api at `http://localhost:3000`  
+  Access the website at `http://localhost:8080`  
 
 ### Not Using Docker
 
