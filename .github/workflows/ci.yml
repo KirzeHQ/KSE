@@ -2,8 +2,9 @@ name: CI
 
 on:
   pull_request:
+  merge_group:
   push:
-    branches: [ main ]
+
 
 permissions:
   contents: read
@@ -22,7 +23,6 @@ jobs:
         include:
 
           - name: Check for common security misconfigurations
-            needs_bundle: true
             run: bundle exec rails_best_practices --only=security
 
           - name: Prettier check - Indexer area
@@ -36,6 +36,9 @@ jobs:
       
           - name: Scan for known security vulnerabilities in gems used
             run: bin/bundler-audit
+
+          - name: RuboCop
+            run: bin/rubocop -f github
       
     name: ${{ matrix.name }}
     steps:
@@ -52,7 +55,6 @@ jobs:
           bundler-cache: true
 
       - name: Bundle install
-        if: matrix.needs_bundle
         run: bundle install --jobs 4 --retry 3
 
       #- name: Install JS dependencies
@@ -71,6 +73,67 @@ jobs:
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.run }}
 
+  db_checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgresql://postgres:password@localhost:5432/test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: .ruby-version
+          bundler-cache: true
+
+      - name: Check schema matches migrations
+        id: migration_check
+        run: |
+          bundle exec rails db:migrate
+          git diff --exit-code db/schema.rb
+      - name: Comment on schema failure
+        if: failure() && steps.migration_check.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### :rage2: \n Schema dump has fallen out of date\n\nRun \`docker compose exec api rails db:migrate\` locally and commit the changes to \`db/schema.rb\`.`
+            });
+
+      - name: Check annotations are up to date
+        id: annotate_check
+        if: success()
+        run: bundle exec annotaterb models --frozen
+      - name: Comment on annotation failure
+        if: failure() && steps.annotate_check.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### :rage1: \n Model annotations have fallen out of date.\n\nPlease run \`docker compose exec api bundle exec annotaterb models\` locally and commit the changes.`
+            });
 # Whats a test
 #  test:
 #    runs-on: ubuntu-latest

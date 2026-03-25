@@ -63,3 +63,5 @@ gem "erb_lint", require: false
 gem "sentry-rails"
 
 gem "query_count"
+
+gem "annotaterb"
