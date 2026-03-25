@@ -62,7 +62,7 @@ docker compose exec api rails db:migrate
 docker compose exec api bin/rails db:regenerate_schema
 
 # Regenerate db/schema.rb using a temporary Postgres Docker container
-docker compose exec api bash -lc "USE_TEMP_PG=1 bin/rails db:regenerate_schema"
+USE_TEMP_PG=1 bin/rails db:regenerate_schema
 
 # Regenerate schema from the current DB (use with care)
 docker compose exec api bash -lc "USE_CURRENT_DB=1 bin/rails db:regenerate_schema"

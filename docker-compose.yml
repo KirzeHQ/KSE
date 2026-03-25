@@ -12,8 +12,8 @@ services:
     depends_on:
       - db
     volumes:
-      - web_data:/app/tmp
-      - web_data:/app/log
+      - kse_web_data:/app/tmp
+      - kse_web_data:/app/log
 
   db:
     image: postgres:15
@@ -25,7 +25,7 @@ services:
     ports:
       - "${DB_PORT}:5432"
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - kse_db_data:/var/lib/postgresql/data
 
   watchtower:
     image: containrrr/watchtower
@@ -43,5 +43,5 @@ services:
       fi'
 
 volumes:
-  db_data:
-  web_data:
+  kse_db_data:
+  kse_web_data:
