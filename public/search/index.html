@@ -44,8 +44,8 @@
           status.textContent = 'Searching for: ' + q;
 
           var base = await resolveApiBase();
-          var url = (base ? base : '') + '/api/v1/search?q=' + encodeURIComponent(q) + '&page=' + page + '&per_page=25';
-          var headers = {};
+          var url = (base ? base : '') + '/api/v1/search?q=' + encodeURIComponent(q) + '&page=' + page + '&per_page=25&format=json';
+          var headers = { 'Accept': 'application/json' };
           try{ var secret = localStorage.getItem('kse_secret'); if(secret) headers['Authorization']='Bearer ' + secret; }catch(e){}
 
           try{

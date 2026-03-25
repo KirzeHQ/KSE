@@ -18,7 +18,7 @@ class IndexSubmissionProcessor
       next unless rec[:url].present?
 
       key = "url:#{Digest::SHA256.hexdigest(rec[:url])}"
-      text_index = [rec[:title], rec[:description], rec[:content]].compact.join("\n")[0..10000]
+      text_index = [ rec[:title], rec[:description], rec[:content] ].compact.join("\n")[0..10000]
       # normalize crawl_date to milliseconds
       crawl_date_ms = rec[:crawl_date] ? (rec[:crawl_date].to_f * 1000).to_i : nil
       data_hash = rec.merge(crawl_date: crawl_date_ms)

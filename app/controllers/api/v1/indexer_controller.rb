@@ -152,7 +152,7 @@ class Api::V1::IndexerController < Api::BaseController
 
     unless @api_key && !@api_key.revoked && @api_key.indexer?
       render json: { error: "Unauthorized" }, status: :unauthorized
-      return
+      nil
     end
   end
 end
