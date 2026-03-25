@@ -66,6 +66,7 @@ jobs:
             vendor/bundle
             tmp/rubocop
             **/node_modules
+            /var/cache/apt/archives
           key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock') }}
           restore-keys: |
             ${{ runner.os }}-deps-
