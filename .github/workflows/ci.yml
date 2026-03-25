@@ -78,16 +78,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: password
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: --health-cmd="pg_isready" --health-interval=10s --health-timeout=5s --health-retries=3
     env:
       RAILS_ENV: test
       DATABASE_URL: postgresql://postgres:password@localhost:5432/test
@@ -96,6 +86,18 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev
+
+      - name: Install Postgres on runner (fallback to avoid Docker Hub pulls)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget ca-certificates lsb-release gnupg
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-15 postgresql-client-15 libpq-dev
+          sudo pg_ctlcluster 15 main start || sudo systemctl start postgresql || true
+          sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'password';" || true
+          sudo -u postgres createdb -O postgres test || true
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -132,14 +134,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `### :rage1: \n
-              Model annotations have fallen out of date
-              \n
-              Please run 
-              \n
-              \`docker compose exec api bundle exec annotaterb models\`
-              \n
-              locally and commit the changes.`
+              body: `### :rage1: \n Model annotations have fallen out of date\n\nPlease run \`docker compose exec api bundle exec annotaterb models\` locally and commit the changes.`
             });
 # Whats a test
 #  test:
