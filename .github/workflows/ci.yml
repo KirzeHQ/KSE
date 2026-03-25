@@ -105,6 +105,17 @@ jobs:
           ruby-version: .ruby-version
           bundler-cache: true
 
+      - name: Cache dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            vendor/bundle
+            tmp/rubocop
+            /var/cache/apt/archives
+          key: ${{ runner.os }}-deps-${{ hashFiles('**/Gemfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
+
       - name: Check schema matches migrations
         id: migration_check
         run: |
