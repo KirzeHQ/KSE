@@ -49,14 +49,21 @@ Access at `http://localhost:3000`
 
 ### Random Useful Commands
 
+#### Clear docker data and start fresh
 ```bash
-# Clear containers, volumes, and images (be careful with this one!)
 docker compose down -v --rmi all
+```
 
-# Migrate db
+#### Migrate db
+```bash
+# If docker is running:
 docker compose exec api rails db:migrate
+# If docker not running:
+docker compose run api bin/rails db:migrate
+```
 
-
+#### Regenerate db/schema.rb
+```bash
 # Regenerate db/schema.rb (runs compatible migrations in a temporary SQLite DB)
 # Skips Postgres-specific migrations (GIN indexes, CONCURRENTLY, extensions)
 docker compose exec api bin/rails db:regenerate_schema
@@ -66,7 +73,19 @@ USE_TEMP_PG=1 bin/rails db:regenerate_schema
 
 # Regenerate schema from the current DB (use with care)
 docker compose exec api bash -lc "USE_CURRENT_DB=1 bin/rails db:regenerate_schema"
+```
 
+#### Rails console
+```bash
 # Run a Rails console
 docker compose exec api rails console
+```
+
+#### Lint code
+```bash
+# Run RuboCop linter
+bin/rubocop -a
+
+# Run Prettier check (indexer)
+npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
 ```
