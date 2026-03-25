@@ -25,25 +25,8 @@ jobs:
             needs_bundle: true
             run: bundle exec rails_best_practices --only=security
 
-          # Dependabot exists  
-          #- name: Check for outdated dependencies
-          #  needs_bundle: true
-          #  run: bundle config unset deployment && bundle outdated --strict
-          
-          # None Yet
-          #- name: ERB Lint
-          #  needs_bundle: true
-          #  run: bundle exec erb_lint --lint-all
-
-          # None Yet  
-          #- name: Prettier check - Ruby area
-          #  run: npx prettier --check "app/**.{js,jsx,css,scss,html}"
-
           - name: Prettier check - Indexer area
             run: npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
-
-          #- name: Check for vulnerable JavaScript dependencies
-          #  run: npm audit --audit-level=high
 
           - name: Zeitwerk check
             run: bin/rails zeitwerk:check
