@@ -1,4 +1,5 @@
 class Account < ApplicationRecord
+  has_many :api_keys, dependent: :destroy
   has_secure_password
 
   validates :email, presence: true, uniqueness: true

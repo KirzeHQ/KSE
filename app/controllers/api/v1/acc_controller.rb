@@ -97,6 +97,36 @@ class Api::V1::AccController < Api::BaseController
     render json: { account: { id: @current_account.id, email: @current_account.email, name: @current_account.name } }
   end
 
+  # GET /api/v1/acc/keys
+  def keys
+    require_auth!
+    keys = @current_account.api_keys.order(created_at: :desc).map do |k|
+      { id: k.id, name: k.name, kind: k.kind, revoked: k.revoked, created_at: k.created_at }
+    end
+    render json: { keys: keys }
+  end
+
+  # POST /api/v1/acc/keys
+  def create_key
+    require_auth!
+    kind = params[:kind].to_s
+    unless %w[crawler indexer].include?(kind)
+      return render json: { error: "Invalid kind" }, status: :bad_request
+    end
+
+    name = params[:name].to_s
+    api_key = @current_account.api_keys.create!(kind: kind, name: name)
+    render json: { token: api_key.token, key: { id: api_key.id, name: api_key.name, kind: api_key.kind, revoked: api_key.revoked, created_at: api_key.created_at } }, status: :created
+  end
+
+  # DELETE /api/v1/acc/keys/:id
+  def revoke_key
+    require_auth!
+    key = @current_account.api_keys.find(params[:id])
+    key.update!(revoked: true)
+    render json: { ok: true }
+  end
+
   private
 
   def require_auth!

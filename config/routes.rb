@@ -8,6 +8,7 @@ Rails.application.routes.draw do
     namespace :v1 do
       namespace :crawler do
         post "next", action: "next"
+        post "batch", action: "batch"
         patch ":id", action: "update"
         post ":id/error", action: "error"
       end
@@ -25,6 +26,9 @@ Rails.application.routes.draw do
         post "confirm", action: "confirm"
         delete "delete", action: "delete"
         patch "edit", action: "edit"
+        get "keys", action: "keys"
+        post "keys", action: "create_key"
+        delete "keys/:id", action: "revoke_key"
       end
 
       namespace :oauth do

@@ -28,13 +28,85 @@
       window.location.replace('/acc/login/?next=' + next);
     }
 
-    document.getElementById('site-year')?.textContent = new Date().getFullYear();
+    var siteYearEl = document.getElementById('site-year');
+    if (siteYearEl) siteYearEl.textContent = new Date().getFullYear();
     var content = document.getElementById('content');
     if(secret){
-      content.textContent = 'You are logged in. This is a skeleton dashboard.';
-      var btn = document.createElement('button'); btn.textContent = 'Logout'; btn.className='btn-ghost'; btn.style.display='block'; btn.style.marginTop='12px';
+      content.innerHTML = '';
+
+      var info = document.createElement('div');
+      info.textContent = 'You are logged in.';
+      content.appendChild(info);
+
+      // Logout
+      var btn = document.createElement('button'); btn.textContent = 'Logout'; btn.className='btn-ghost'; btn.style.display='inline-block'; btn.style.marginTop='12px';
       btn.addEventListener('click', function(){ try { localStorage.removeItem('kse_secret'); } catch(e){}; window.location.href = '/'; });
       content.appendChild(btn);
+
+      // API Keys UI
+      var keysSection = document.createElement('div'); keysSection.style.marginTop = '18px';
+      var h = document.createElement('h3'); h.textContent = 'API Keys'; keysSection.appendChild(h);
+
+      var crawlerBox = document.createElement('div');
+      var crawlerTitle = document.createElement('h4'); crawlerTitle.textContent = 'Crawler Keys'; crawlerBox.appendChild(crawlerTitle);
+      var crawlerList = document.createElement('div'); crawlerList.id = 'crawler-keys'; crawlerBox.appendChild(crawlerList);
+      var createCrawlerBtn = document.createElement('button'); createCrawlerBtn.textContent = 'Create Crawler Key'; createCrawlerBtn.className='btn'; createCrawlerBtn.style.marginTop='8px';
+      crawlerBox.appendChild(createCrawlerBtn);
+
+      var indexerBox = document.createElement('div');
+      var indexerTitle = document.createElement('h4'); indexerTitle.textContent = 'Indexer Keys'; indexerBox.appendChild(indexerTitle);
+      var indexerList = document.createElement('div'); indexerList.id = 'indexer-keys'; indexerBox.appendChild(indexerList);
+
+      keysSection.appendChild(crawlerBox);
+      keysSection.appendChild(indexerBox);
+      content.appendChild(keysSection);
+
+      function authHeaders(){ return { 'Accept': 'application/json', 'Authorization': 'Bearer '+secret, 'Content-Type': 'application/json' }; }
+
+      async function loadKeys(){
+        try{
+          const res = await fetch('/api/v1/acc/keys', { headers: authHeaders() });
+          if(!res.ok) throw new Error('Failed to load keys');
+          const data = await res.json();
+          const keys = data.keys || [];
+          crawlerList.innerHTML = '';
+          indexerList.innerHTML = '';
+          for(const k of keys){
+            const el = document.createElement('div');
+            el.style.borderTop='1px solid #eee'; el.style.padding='8px 0';
+            el.textContent = `${k.name || '(no name)'} — ${k.kind} — ${k.revoked ? 'revoked' : 'active'} — ${new Date(k.created_at).toLocaleString()}`;
+            if(!k.revoked){
+              const r = document.createElement('button'); r.textContent='Revoke'; r.className='btn-ghost'; r.style.marginLeft='8px';
+              r.addEventListener('click', async ()=>{
+                try{
+                  const rr = await fetch('/api/v1/acc/keys/'+k.id, { method: 'DELETE', headers: authHeaders() });
+                  if(!rr.ok) throw new Error('Revoke failed');
+                  loadKeys();
+                }catch(e){ alert('Revoke failed'); }
+              });
+              el.appendChild(r);
+            }
+            if(k.kind === 'crawler') crawlerList.appendChild(el);
+            else indexerList.appendChild(el);
+          }
+        }catch(e){
+          crawlerList.textContent = 'Failed to load keys';
+        }
+      }
+
+      createCrawlerBtn.addEventListener('click', async ()=>{
+        const name = prompt('Name for this crawler key (optional)');
+        try{
+          const res = await fetch('/api/v1/acc/keys', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind: 'crawler', name: name }) });
+          if(!res.ok) throw new Error('create failed');
+          const data = await res.json();
+          // show token to user once
+          alert('API key created. Token: ' + data.token + '\nSave this now — it will not be shown again.');
+          loadKeys();
+        }catch(e){ alert('Failed to create key'); }
+      });
+
+      loadKeys();
     }
   </script>
 </body>
