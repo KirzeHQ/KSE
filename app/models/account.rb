@@ -1,3 +1,26 @@
+# == Schema Information
+#
+# Table name: accounts
+#
+#  id                   :bigint           not null, primary key
+#  api_token            :string
+#  confirmation_sent_at :datetime
+#  confirmation_token   :string
+#  confirmed_at         :datetime
+#  created_at           :datetime         not null
+#  email                :string           not null
+#  github_uid           :string
+#  name                 :string
+#  password_digest      :string
+#  updated_at           :datetime         not null
+#
+# Indexes
+#
+#  index_accounts_on_api_token           (api_token) UNIQUE
+#  index_accounts_on_confirmation_token  (confirmation_token) UNIQUE
+#  index_accounts_on_email               (email) UNIQUE
+#  index_accounts_on_github_uid          (github_uid) UNIQUE
+#
 class Account < ApplicationRecord
   has_many :api_keys, dependent: :destroy
   has_secure_password
