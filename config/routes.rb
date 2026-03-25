@@ -15,6 +15,7 @@ Rails.application.routes.draw do
 
       namespace :indexer do
         post "next", action: "next"
+        patch "submit", action: "submit"
         post ":id/result", action: "result"
         post ":id/error", action: "error"
       end

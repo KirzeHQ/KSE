@@ -31,6 +31,47 @@ class Api::V1::SearchController < Api::BaseController
       end
     end
 
+    # Decide response format: default to binary (.bin) unless JSON explicitly requested
+    accept = request.headers["Accept"].to_s
+    want_json = params[:format].to_s.downcase == "json" || accept.include?("application/json")
+
+    unless want_json
+      # encode only the blob results (type == 'blob') into .bin
+      blob_records = []
+      results.each do |r|
+        next unless r[:type] == "blob"
+        blob = SearchBlob.find_by(id: r[:id])
+        rec = { url: nil, title: "", content: "", description: "", sitename: "", crawl_date: nil, status_code: 0, outlinks: [] }
+        if blob
+          begin
+            if blob.data.present?
+              parsed = JSON.parse(blob.data.force_encoding("UTF-8")) rescue nil
+              if parsed.is_a?(Hash)
+                rec[:url] = parsed["url"] || parsed["u"] || r[:url]
+                rec[:title] = parsed["title"] || ""
+                rec[:content] = parsed["content"] || ""
+                rec[:description] = parsed["description"] || ""
+                rec[:sitename] = parsed["sitename"] || ""
+                rec[:crawl_date] = parsed["crawl_date"] ? Time.at(parsed["crawl_date"].to_i / 1000.0) : nil
+                rec[:status_code] = parsed["status_code"] || 0
+                rec[:outlinks] = parsed["outlinks"] || []
+              end
+            end
+          rescue StandardError
+          end
+        end
+        # fallbacks
+        rec[:url] ||= r[:url] || ""
+        rec[:title] = r[:snippet] || rec[:title] || ""
+        blob_records << rec
+      end
+
+      bin = BinRecordEncoder.encode_batch(blob_records)
+      response.headers["X-URL-Count"] = blob_records.length.to_s
+      send_data bin, type: "application/octet-stream", disposition: "attachment; filename=search_#{Time.now.to_i}.bin"
+      return
+    end
+
     render json: { results: results, page: page, per_page: per }
   end
 end

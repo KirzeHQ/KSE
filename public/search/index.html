@@ -24,57 +24,74 @@
     <div id="site-footer"></div>
     <script src="/js/site_layout.js"></script>
     <script>
-      function getQuery() {
-        var params = new URLSearchParams(window.location.search);
-        return params.get('q') || '';
-      }
+      (function(){
+        function getQuery(){ var p = new URLSearchParams(window.location.search); return p.get('q') || ''; }
+        function getPage(){ var p = new URLSearchParams(window.location.search); return Math.max(1, parseInt(p.get('page')||'1',10)); }
 
-      var q = getQuery();
-      var status = document.getElementById('status');
-      var result = document.getElementById('result');
-
-      if (!q) {
-        status.textContent = 'No query provided in the URL.';
-      } else {
-        status.textContent = 'Searching for: ' + q;
-
-        var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-        if(!apiBase && window.KSE && window.KSE.fragmentsReady){
-          window.KSE.fragmentsReady.then(function(){
+        async function resolveApiBase(){
+          var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
+          if(!apiBase && window.KSE && window.KSE.fragmentsReady){
+            try{ await window.KSE.fragmentsReady; }catch(e){}
             apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-            var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
-            doFetch(searchUrl);
-          });
-        } else {
-          var searchUrl = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/search?q=' + encodeURIComponent(q) : '/api/v1/search?q=' + encodeURIComponent(q);
-          doFetch(searchUrl);
+          }
+          return apiBase ? apiBase.replace(/\/$/, '') : '';
         }
 
-        function doFetch(searchUrl){
+        async function doSearch(q, page){
+          var status = document.getElementById('status');
+          var result = document.getElementById('result');
+          result.innerHTML = '';
+          status.textContent = 'Searching for: ' + q;
+
+          var base = await resolveApiBase();
+          var url = (base ? base : '') + '/api/v1/search?q=' + encodeURIComponent(q) + '&page=' + page + '&per_page=25';
           var headers = {};
-          try { var secret = localStorage.getItem('kse_secret'); if (secret) headers['Authorization'] = 'Bearer ' + secret; } catch (e) {}
+          try{ var secret = localStorage.getItem('kse_secret'); if(secret) headers['Authorization']='Bearer ' + secret; }catch(e){}
 
-          fetch(searchUrl, { cache: 'no-store', mode: 'cors', headers: headers })
-            .then(function(res){
-              if (res.status === 429) throw new Error('Rate limited');
-              if (!res.ok) throw new Error('Search failed');
-              return res.json();
-            })
-            .then(function(json){
-              status.textContent = '';
-              if (!json.results || !json.results.length) { result.textContent = 'No results'; return; }
-              var ul = document.createElement('ul');
-              json.results.forEach(function(r){
-                var li = document.createElement('li');
-                if (r.type === 'account') { li.textContent = '[Account] ' + r.email + ' — ' + (r.name || ''); }
-                else { li.textContent = '[' + r.type + '] ' + (r.url || r.id || JSON.stringify(r)); }
-                ul.appendChild(li);
-              });
-              result.appendChild(ul);
-            })
-            .catch(function(err){ console.error(err); status.textContent = 'Search unavailable: ' + err.message; });
+          try{
+            var res = await fetch(url, { cache: 'no-store', headers: headers });
+            if(!res.ok) throw new Error('Search failed: ' + res.status);
+            var json = await res.json();
+            status.textContent = '';
+            if(!json.results || !json.results.length){ result.textContent = 'No results'; return; }
+
+            var ul = document.createElement('ul'); ul.className='search-results';
+            json.results.forEach(function(r){
+              var li = document.createElement('li'); li.className='search-item';
+              if(r.type === 'account'){
+                var title = document.createElement('div'); title.textContent = r.name ? r.name + ' ('+r.email+')' : r.email; title.className='result-title';
+                li.appendChild(title);
+              } else if(r.type === 'blob'){
+                var title = document.createElement('div');
+                var a = document.createElement('a'); a.href = r.url || '#'; a.textContent = r.url || (r.key || ('blob '+r.id)); a.target='_blank'; a.rel='noopener'; a.className='result-link';
+                title.appendChild(a);
+                li.appendChild(title);
+                if(r.snippet){ var sn = document.createElement('div'); sn.className='snippet'; sn.textContent = r.snippet; li.appendChild(sn); }
+                var meta = document.createElement('div'); meta.className='muted'; meta.textContent = (r.source ? r.source + ' ' : '') + (r.job_id ? 'job:'+r.job_id : ''); li.appendChild(meta);
+              } else {
+                li.textContent = JSON.stringify(r);
+              }
+              ul.appendChild(li);
+            });
+            result.appendChild(ul);
+
+            // pager
+            var pager = document.createElement('div'); pager.className='pager muted';
+            var current = json.page || page; var per = json.per_page || 25;
+            var prev = document.createElement('button'); prev.textContent='Prev'; prev.disabled = current <= 1;
+            var next = document.createElement('button'); next.textContent='Next';
+            prev.addEventListener('click', function(){ var p = Math.max(1, current-1); var ps = new URLSearchParams(window.location.search); ps.set('q', q); ps.set('page', p); window.location.search = ps.toString(); });
+            next.addEventListener('click', function(){ var p = current+1; var ps = new URLSearchParams(window.location.search); ps.set('q', q); ps.set('page', p); window.location.search = ps.toString(); });
+            pager.appendChild(prev); pager.appendChild(document.createTextNode(' Page '+current+' ')); pager.appendChild(next);
+            result.appendChild(pager);
+
+          }catch(err){ console.error(err); status.textContent = 'Search unavailable: ' + (err.message || err); }
         }
-      }
+
+        var q = getQuery();
+        if(!q) document.getElementById('status').textContent = 'No query provided in the URL.';
+        else doSearch(q, getPage());
+      })();
     </script>
 
 </body>

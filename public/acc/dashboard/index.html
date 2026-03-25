@@ -47,17 +47,12 @@
       var keysSection = document.createElement('div'); keysSection.style.marginTop = '18px';
       var h = document.createElement('h3'); h.textContent = 'API Keys'; keysSection.appendChild(h);
 
-      var crawlerBox = document.createElement('div');
-      var crawlerTitle = document.createElement('h4'); crawlerTitle.textContent = 'Crawler Keys'; crawlerBox.appendChild(crawlerTitle);
-      var crawlerList = document.createElement('div'); crawlerList.id = 'crawler-keys'; crawlerBox.appendChild(crawlerList);
-      var createCrawlerBtn = document.createElement('button'); createCrawlerBtn.textContent = 'Create Crawler Key'; createCrawlerBtn.className='btn'; createCrawlerBtn.style.marginTop='8px';
-      crawlerBox.appendChild(createCrawlerBtn);
-
       var indexerBox = document.createElement('div');
       var indexerTitle = document.createElement('h4'); indexerTitle.textContent = 'Indexer Keys'; indexerBox.appendChild(indexerTitle);
       var indexerList = document.createElement('div'); indexerList.id = 'indexer-keys'; indexerBox.appendChild(indexerList);
+      var createIndexerBtn = document.createElement('button'); createIndexerBtn.textContent = 'Create Indexer Key'; createIndexerBtn.className='btn'; createIndexerBtn.style.marginTop='8px';
+      indexerBox.appendChild(createIndexerBtn);
 
-      keysSection.appendChild(crawlerBox);
       keysSection.appendChild(indexerBox);
       content.appendChild(keysSection);
 
@@ -69,12 +64,12 @@
           if(!res.ok) throw new Error('Failed to load keys');
           const data = await res.json();
           const keys = data.keys || [];
-          crawlerList.innerHTML = '';
           indexerList.innerHTML = '';
           for(const k of keys){
+            if (k.kind !== 'indexer') continue;
             const el = document.createElement('div');
             el.style.borderTop='1px solid #eee'; el.style.padding='8px 0';
-            el.textContent = `${k.name || '(no name)'} — ${k.kind} — ${k.revoked ? 'revoked' : 'active'} — ${new Date(k.created_at).toLocaleString()}`;
+            el.textContent = `${k.name || '(no name)'} — ${k.revoked ? 'revoked' : 'active'} — ${new Date(k.created_at).toLocaleString()}`;
             if(!k.revoked){
               const r = document.createElement('button'); r.textContent='Revoke'; r.className='btn-ghost'; r.style.marginLeft='8px';
               r.addEventListener('click', async ()=>{
@@ -86,18 +81,17 @@
               });
               el.appendChild(r);
             }
-            if(k.kind === 'crawler') crawlerList.appendChild(el);
-            else indexerList.appendChild(el);
+            indexerList.appendChild(el);
           }
         }catch(e){
-          crawlerList.textContent = 'Failed to load keys';
+          indexerList.textContent = 'Failed to load keys';
         }
       }
 
-      createCrawlerBtn.addEventListener('click', async ()=>{
-        const name = prompt('Name for this crawler key (optional)');
+      createIndexerBtn.addEventListener('click', async ()=>{
+        const name = prompt('Name for this indexer key (optional)');
         try{
-          const res = await fetch('/api/v1/acc/keys', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind: 'crawler', name: name }) });
+          const res = await fetch('/api/v1/acc/keys', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ kind: 'indexer', name: name }) });
           if(!res.ok) throw new Error('create failed');
           const data = await res.json();
           // show token to user once

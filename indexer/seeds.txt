@@ -1,0 +1,7 @@
+# Default seeds for the indexer (one URL per line). Lines starting with # are ignored.
+# http://localhost:3000/
+# Add more seeds below, one per line, or set SEED_URLS="https://example.com,https://other/"
+
+https://www.wikipedia.org/
+https://www.github.com/
+https://google.com/
