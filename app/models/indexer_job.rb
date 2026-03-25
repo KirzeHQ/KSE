@@ -1,3 +1,22 @@
+# == Schema Information
+#
+# Table name: indexer_jobs
+#
+#  id         :bigint           not null, primary key
+#  claimed_at :datetime
+#  claimed_by :string
+#  last_error :text
+#  payload    :json
+#  state      :string           default("pending"), not null
+#  url        :string           not null
+#  created_at :datetime         not null
+#  updated_at :datetime         not null
+#
+# Indexes
+#
+#  index_indexer_jobs_on_claimed_at  (claimed_at)
+#  index_indexer_jobs_on_state       (state)
+#
 class IndexerJob < ApplicationRecord
   scope :pending, -> { where(state: "pending") }
 

@@ -7,11 +7,11 @@
 #  confirmation_sent_at :datetime
 #  confirmation_token   :string
 #  confirmed_at         :datetime
-#  created_at           :datetime         not null
 #  email                :string           not null
 #  github_uid           :string
 #  name                 :string
 #  password_digest      :string
+#  created_at           :datetime         not null
 #  updated_at           :datetime         not null
 #
 # Indexes
