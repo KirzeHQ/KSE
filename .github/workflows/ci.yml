@@ -105,7 +105,7 @@ jobs:
       - name: Check schema matches migrations
         id: migration_check
         run: |
-          bundle exec rails db:migrate
+          USE_CURRENT_DB=1 bundle exec rake db:regenerate_schema
           git diff --exit-code db/schema.rb
       - name: Comment on schema failure
         if: failure() && steps.migration_check.outcome == 'failure' && github.event_name == 'pull_request'
@@ -116,7 +116,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `### :rage2: \n Schema dump has fallen out of date\n\nRun \`docker compose exec api rails db:migrate\` locally and commit the changes to \`db/schema.rb\`.`
+              body: `### :rage2: \n Schema dump has fallen out of date\n\nRegenerate locally and commit the changes to \`db/schema.rb\`. For example:\n\n\`docker compose exec api bin/rails db:regenerate_schema\`\n\nOr to use a temporary Postgres container locally:\n\`docker compose exec api bash -lc "USE_TEMP_PG=1 bin/rails db:regenerate_schema"\``
             });
 
       - name: Check annotations are up to date
@@ -132,7 +132,14 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `### :rage1: \n Model annotations have fallen out of date.\n\nPlease run \`docker compose exec api bundle exec annotaterb models\` locally and commit the changes.`
+              body: `### :rage1: \n
+              Model annotations have fallen out of date
+              \n
+              Please run 
+              \n
+              \`docker compose exec api bundle exec annotaterb models\`
+              \n
+              locally and commit the changes.`
             });
 # Whats a test
 #  test:
