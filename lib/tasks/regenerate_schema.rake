@@ -120,14 +120,14 @@ namespace :db do
 
           db_url = "postgresql://#{pg_user}:#{pg_password}@127.0.0.1:#{host_port}/#{pg_db}"
           puts "Dumping schema via external rails process using DATABASE_URL=#{db_url}"
-          env = { 'DATABASE_URL' => db_url, 'RAILS_ENV' => ENV['RAILS_ENV'] || 'development' }
+          env = { "DATABASE_URL" => db_url, "RAILS_ENV" => ENV["RAILS_ENV"] || "development" }
           stdout, stderr, status = Open3.capture3(env, "bin/rails", "db:schema:dump")
           unless status.success?
             logs, _, _ = Open3.capture3("docker", "logs", container_name)
             raise "db:schema:dump failed: #{stderr}\nContainer logs:\n#{logs}"
           end
           puts stdout if stdout && !stdout.empty?
-          puts "Wrote #{rails_root.join('db','schema.rb')}"
+          puts "Wrote #{rails_root.join('db', 'schema.rb')}"
         ensure
           if original_config
             ActiveRecord::Base.establish_connection(original_config)
