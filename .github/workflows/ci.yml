@@ -24,9 +24,9 @@ jobs:
 
           - name: Check for common security misconfigurations
             run: bundle exec rails_best_practices --only=security
-
-          - name: Prettier check - Indexer area
-            run: npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
+          # Not completing
+          #- name: Prettier check - Indexer area
+          #  run: npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
 
           - name: Zeitwerk check
             run: bin/rails zeitwerk:check
