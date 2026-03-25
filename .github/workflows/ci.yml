@@ -121,18 +121,17 @@ jobs:
               body: `### :rage2: \n Schema dump has fallen out of date\n\nRegenerate locally and commit the changes to \`db/schema.rb\`. For example:\n\n\`docker compose exec api bin/rails db:regenerate_schema\`\n\nOr to use a temporary Postgres container locally:\n\`docker compose exec api bash -lc "USE_TEMP_PG=1 bin/rails db:regenerate_schema"\``
             });
 
-      - name: Show annotaterb diff (debug)
-        if: success()
-        run: |
-          # Show what annotaterb would change without failing the job
-          bundle exec annotaterb models || true
-          echo "---- git diff: app/models ----"
-          git --no-pager diff -- app/models || true
-
       - name: Check annotations are up to date
         id: annotate_check
         if: success()
         run: bundle exec annotaterb models --frozen
+      - name: Show annotaterb diff
+        if: failure() && steps.annotate_check.outcome == 'failure'
+        run: |
+          # Run annotaterb (non-frozen) and print the model diffs so logs show exact changes
+          bundle exec annotaterb models || true
+          echo "---- git diff: app/models ----"
+          git --no-pager diff -- app/models || true
       - name: Comment on annotation failure
         if: failure() && steps.annotate_check.outcome == 'failure' && github.event_name == 'pull_request'
         uses: actions/github-script@v8
