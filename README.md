@@ -89,3 +89,8 @@ bin/rubocop -a
 # Run Prettier check (indexer)
 npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
 ```
+
+#### Our Production CMD
+```bash
+docker compose -f docker-compose.prod.yml up -d --remove-orphans --build
+```
