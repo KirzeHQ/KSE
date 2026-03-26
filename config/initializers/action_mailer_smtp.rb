@@ -1,44 +1,22 @@
 Rails.application.config.after_initialize do
-  send_from = ENV.fetch("SEND_FROM", ENV.fetch("MAIL_NAME", "noreply@example.com"))
-  send_from_name = ENV["SEND_FROM_NAME"].to_s
-  ActionMailer::Base.default_options = { from: send_from_name.present? ? "#{send_from_name} <#{send_from}>" : send_from }
-
-  smtp_address = ENV.fetch("SMTP_ADDRESS", "smtp.gmail.com")
-  smtp_port = ENV.fetch("SMTP_PORT", 587).to_i
-  smtp_domain = ENV.fetch("SMTP_DOMAIN", "example.com")
-  smtp_user = send_from
-  smtp_password = ENV["MAIL_PASSWORD"]
-  smtp_auth = (ENV["SMTP_AUTHENTICATION"] || "plain").to_sym
-
-  use_ssl = if ENV.key?("SMTP_SSL")
-    ENV["SMTP_SSL"].to_s.downcase == "true"
-  else
-    smtp_port == 465
-  end
-
-  enable_starttls = if ENV.key?("SMTP_ENABLE_STARTTLS")
-    ENV["SMTP_ENABLE_STARTTLS"].to_s.downcase == "true"
-  else
-    !use_ssl
-  end
-
-  ActionMailer::Base.smtp_settings = {
-    address: smtp_address,
-    port: smtp_port,
-    domain: smtp_domain,
-    user_name: smtp_user,
-    password: smtp_password,
-    authentication: smtp_auth,
-    enable_starttls_auto: enable_starttls
+  smtp = {
+    address: ENV.fetch("SMTP_ADDRESS", "smtp.gmail.com"),
+    port: ENV.fetch("SMTP_PORT", 587).to_i,
+    domain: ENV.fetch("SMTP_DOMAIN", "example.com"),
+    user_name: (ENV["SMTP_USER"] || ENV["SEND_FROM"] || ENV["MAIL_NAME"]),
+    password: ENV["MAIL_PASSWORD"],
+    authentication: (ENV["SMTP_AUTHENTICATION"] || "plain").to_sym,
+    enable_starttls_auto: (ENV.key?("SMTP_ENABLE_STARTTLS") ? ENV["SMTP_ENABLE_STARTTLS"].to_s.downcase == "true" : true)
   }
 
-  # If implicit SSL requested, set the SSL flag and disable STARTTLS
-  if use_ssl
-    ActionMailer::Base.smtp_settings[:ssl] = true
-    ActionMailer::Base.smtp_settings[:enable_starttls_auto] = false
+  # Implicit SSL (SMTPS) when using port 465 or when explicitly requested.
+  if (ENV["SMTP_SSL"] || smtp[:port] == 465).to_s.downcase == "true" || smtp[:port] == 465
+    smtp[:ssl] = true
+    smtp[:enable_starttls_auto] = false
   end
 
-  if ENV["SMTP_OPENSSL_VERIFY_MODE"].present?
-    ActionMailer::Base.smtp_settings[:openssl_verify_mode] = ENV["SMTP_OPENSSL_VERIFY_MODE"]
-  end
+  smtp[:openssl_verify_mode] = ENV["SMTP_OPENSSL_VERIFY_MODE"] if ENV["SMTP_OPENSSL_VERIFY_MODE"].present?
+
+  ActionMailer::Base.smtp_settings = smtp
+  ActionMailer::Base.delivery_method = (ENV.fetch("MAIL_DELIVERY_METHOD", "smtp")).to_sym
 end

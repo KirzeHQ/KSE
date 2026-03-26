@@ -1,6 +1,4 @@
 class AccountsMailer < ApplicationMailer
-  default from: ENV.fetch("MAIL_NAME", "noreply@example.com")
-
   def welcome
     @account = params[:account]
     mail(to: @account.email, subject: "Welcome to KSE")
