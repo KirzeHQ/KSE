@@ -65,3 +65,5 @@ gem "sentry-rails"
 gem "query_count"
 
 gem "annotaterb"
+
+gem "dotenv-rails"
