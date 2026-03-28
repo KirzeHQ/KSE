@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_25_000300) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_28_000100) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "unaccent"
@@ -89,11 +89,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_25_000300) do
     t.string "key", null: false
     t.string "source"
     t.text "text_index"
+    t.tsvector "text_search"
     t.datetime "updated_at", null: false
-    t.index "to_tsvector('english'::regconfig, ((COALESCE(text_index, ''::text) || ' '::text) || (COALESCE(key, ''::character varying))::text))", name: "index_search_blobs_on_text_search", using: :gin
     t.index ["job_id"], name: "index_search_blobs_on_job_id"
     t.index ["key"], name: "index_search_blobs_on_key", unique: true
     t.index ["source"], name: "index_search_blobs_on_source"
+    t.index ["text_search"], name: "index_search_blobs_on_text_search_col", using: :gin
   end
 
   add_foreign_key "api_keys", "accounts"
