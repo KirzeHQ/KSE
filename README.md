@@ -1,5 +1,38 @@
 # KSE
 
+
+## Optimizations
+
+## Stored tsvector column and GIN index for full-text search
+
+To improve full-text search performance, implemented a stored tsvector column and a GIN index:
+
+- **Stored tsvector column (`text_search`)**: adds a precomputed `tsvector` to `search_blobs`, avoiding recomputing text on every query and reducing CPU during searches and indexes.
+- **GIN index on `text_search`**: a GIN index created concurrently speeds up full-text queries.
+- **Unaccent + trigger**: a trigger function populates `text_search` using `unaccent(...)` so searches that ignore accents (pg_search `ignoring: :accents`) can use the index.
+- **PgSearch integration**: `SearchBlob` is configured to use the stored `text_search` tsvector so queries leverage the GIN index.
+
+How to verify:
+
+```bash
+# run migrations
+bin/rails db:migrate
+
+# list indexes for search_blobs
+bin/rails runner "p ActiveRecord::Base.connection.indexes('search_blobs').map(&:name)"
+
+# Run EXPLAIN ANALYZE in psql or via bin/rails dbconsole to confirm index usage:
+EXPLAIN ANALYZE
+SELECT id, ts_rank(text_search, to_tsquery('english','flavortown:*')) AS rank
+FROM search_blobs
+WHERE text_search @@ to_tsquery('english','flavortown:*')
+ORDER BY rank DESC
+LIMIT 25;
+```
+
+Notes:
+- Migrations are the superiour way to create the column and index, the initializer is a fallback and should not replace proper schema management.
+
 ## Deployment
 
 This project uses Ruby v3.4.2 and Rails v8.1.2  
