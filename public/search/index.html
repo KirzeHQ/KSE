@@ -4,95 +4,60 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>KSE Search</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    :root{--bg:#1E1E1E;--muted:#A0A0A0}
+    body{background:var(--bg);color:#E0E0E0;font-family:Inter,system-ui,Arial,Helvetica,sans-serif;margin:0}
+    .search-container{max-width:980px;margin:0 auto;padding:24px}
+    .status{color:var(--muted);margin-bottom:12px}
+    .results{margin:0;padding:0;display:flex;flex-direction:column;gap:18px}
+    @supports not (gap:18px){ .results > .result{margin-bottom:18px} .results > .result:last-child{margin-bottom:0} }
+    .result .title{margin:0 0 4px;font-size:18px}
+    .desc{color:var(--muted);margin:6px 0;white-space:pre-wrap;line-height:1.35}
+    .url{font-family:Menlo,Monaco,'Courier New',monospace;font-size:12px;color:#006621}
+    .pager{margin-top:12px;color:var(--muted)}
+    .pager button{margin-right:8px;padding:6px 10px;border-radius:6px;background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);cursor:pointer}
+  </style>
 </head>
 <body>
   <div id="site-header"></div>
+  <main class="search-container" role="main">
+    <h1 class="search-title">Search</h1>
+    <form id="searchForm" class="search-bar" onsubmit="return submitForm()">
+      <input id="q" class="search-input" name="q" placeholder="Search KSE..." autocomplete="off" />
+      <button class="search-btn" type="submit">Search</button>
+    </form>
 
-  <main class="container">
-    <section class="hero">
-      <h2>Search results</h2>
-      <p class="muted">Results will appear below. This page queries the API directly.</p>
-    </section>
+    <div id="status" class="status">Enter a query</div>
+    <div id="results" class="results" aria-live="polite"></div>
+    <div id="pager" class="pager"></div>
+  </main>
 
-    <section id="result-area" class="results">
-      <div id="status" class="muted">Parsing URL...</div>
-      <div id="result" aria-live="polite"></div>
-    </section>
-    <div id="site-header"></div>
+  <div id="site-footer"></div>
+  <script src="/js/site_layout.js"></script>
+  <script>
+    // Helpers
+    function getQueryParam(){ var p=new URLSearchParams(location.search); return p.get('q')||'' }
+    function setQueryParam(q){ var p=new URLSearchParams(location.search); if(q) p.set('q',q); else p.delete('q'); history.replaceState(null,'', (p.toString() ? '?' + p.toString() : location.pathname)); }
 
-    <div id="site-footer"></div>
-    <script src="/js/site_layout.js"></script>
-    <script>
-      (function(){
-        function getQuery(){ var p = new URLSearchParams(window.location.search); return p.get('q') || ''; }
-        function getPage(){ var p = new URLSearchParams(window.location.search); return Math.max(1, parseInt(p.get('page')||'1',10)); }
+    function markdownToHtml(s){ if(!s) return ''; s = String(s); s = s.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>'); s = s.replace(/\*(.*?)\*/g,'<em>$1</em>'); s = s.replace(/\r\n|\r|\n/g,'<br>'); return s; }
 
-        async function resolveApiBase(){
-          var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-          if(!apiBase && window.KSE && window.KSE.fragmentsReady){
-            try{ await window.KSE.fragmentsReady; }catch(e){}
-            apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-          }
-          return apiBase ? apiBase.replace(/\/$/, '') : '';
-        }
+    function sanitizeHtml(dirty){ if(!dirty) return ''; var parser = new DOMParser(); var doc = parser.parseFromString(dirty, 'text/html'); var whitelist = ['BR','B','STRONG','EM','I','P','A','CODE','PRE','UL','OL','LI','SPAN']; var allowedAttrs = { 'A': ['href','target','rel'] };
+      (function clean(node){ var child = node.firstChild; while(child){ var next = child.nextSibling; if(child.nodeType === Node.ELEMENT_NODE){ var name = child.nodeName.toUpperCase(); if(whitelist.indexOf(name) === -1){ while(child.firstChild) node.insertBefore(child.firstChild, child); node.removeChild(child); } else { var attrs = Array.from(child.attributes); attrs.forEach(function(a){ if(!(allowedAttrs[name] && allowedAttrs[name].indexOf(a.name) !== -1)){ child.removeAttribute(a.name); } else { if(name === 'A' && a.name === 'href'){ var href = child.getAttribute('href') || ''; if(!/^(https?:|mailto:)/i.test(href)) child.removeAttribute('href'); } if(name === 'A'){ child.setAttribute('rel','noopener noreferrer'); if(!child.getAttribute('target')) child.setAttribute('target','_blank'); } } }); clean(child); } } else if(child.nodeType === Node.TEXT_NODE){ /* keep */ } else { node.removeChild(child); } child = next; } })(doc.body); return doc.body.innerHTML; }
 
-        async function doSearch(q, page){
-          var status = document.getElementById('status');
-          var result = document.getElementById('result');
-          result.innerHTML = '';
-          status.textContent = 'Searching for: ' + q;
+    function renderResults(items,page,per){ var out = document.getElementById('results'); out.innerHTML = ''; if(!items || items.length === 0){ document.getElementById('status').textContent = 'No results'; document.getElementById('pager').innerHTML=''; return; } document.getElementById('status').textContent = '';
+      items.forEach(function(r){ var root = document.createElement('div'); root.className = 'result'; var h = document.createElement('h3'); h.className = 'title'; var a = document.createElement('a'); a.className = 'title-link'; a.href = r.url || '#'; a.target = '_blank'; a.rel = 'noopener'; a.textContent = r.title || r.url || r.key || ('blob ' + (r.id||'')); h.appendChild(a); root.appendChild(h); if(r.description || r.snippet){ var d = document.createElement('div'); d.className = 'desc'; d.innerHTML = sanitizeHtml(markdownToHtml(r.description || r.snippet || '')); root.appendChild(d); } if(r.url){ var u = document.createElement('div'); u.className = 'url'; u.textContent = r.url; root.appendChild(u); } out.appendChild(root); });
 
-          var base = await resolveApiBase();
-          var url = (base ? base : '') + '/api/v1/search?q=' + encodeURIComponent(q) + '&page=' + page + '&per_page=25&format=json';
-          var headers = { 'Accept': 'application/json' };
-          try{ var secret = localStorage.getItem('kse_secret'); if(secret) headers['Authorization']='Bearer ' + secret; }catch(e){}
+      // pager UI
+      var pager = document.getElementById('pager'); pager.innerHTML = ''; var cur = page || 1; var prev = document.createElement('button'); prev.textContent = 'Prev'; prev.disabled = cur <= 1; prev.addEventListener('click', function(){ doSearch(getQueryParam(), Math.max(1, cur-1)); }); var next = document.createElement('button'); next.textContent = 'Next'; next.addEventListener('click', function(){ doSearch(getQueryParam(), cur+1); }); pager.appendChild(prev); pager.appendChild(document.createTextNode(' Page ' + cur + ' ')); pager.appendChild(next);
+    }
 
-          try{
-            var res = await fetch(url, { cache: 'no-store', headers: headers });
-            if(!res.ok) throw new Error('Search failed: ' + res.status);
-            var json = await res.json();
-            status.textContent = '';
-            if(!json.results || !json.results.length){ result.textContent = 'No results'; return; }
+    async function doSearch(q,page){ if(!q){ document.getElementById('status').textContent = 'Enter a query'; return; } document.getElementById('status').textContent = 'Searching for: ' + q; setQueryParam(q); var base = document.querySelector('meta[name="api-base"]')?.content || ''; var url = (base ? base : '') + '/api/v1/search?q=' + encodeURIComponent(q) + '&page=' + (page || 1) + '&per_page=25&format=json'; var headers = { 'Accept': 'application/json' }; try{ var secret = localStorage.getItem('kse_secret'); if(secret) headers['Authorization'] = 'Bearer ' + secret; }catch(e){}
+      try{ var res = await fetch(url, { cache: 'no-store', headers: headers }); if(!res.ok) throw new Error(res.status); var json = await res.json(); renderResults(json.results || [], json.page || page || 1, json.per_page || 25); }catch(e){ console.error(e); document.getElementById('status').textContent = 'Search unavailable'; }
+    }
 
-            var ul = document.createElement('ul'); ul.className='search-results';
-            json.results.forEach(function(r){
-              var li = document.createElement('li'); li.className='search-item';
-              if(r.type === 'account'){
-                var title = document.createElement('div'); title.textContent = r.name ? r.name + ' ('+r.email+')' : r.email; title.className='result-title';
-                li.appendChild(title);
-              } else if(r.type === 'blob'){
-                var title = document.createElement('div');
-                var a = document.createElement('a'); a.href = r.url || '#'; a.textContent = r.url || (r.key || ('blob '+r.id)); a.target='_blank'; a.rel='noopener'; a.className='result-link';
-                title.appendChild(a);
-                li.appendChild(title);
-                if(r.snippet){ var sn = document.createElement('div'); sn.className='snippet'; sn.textContent = r.snippet; li.appendChild(sn); }
-                var meta = document.createElement('div'); meta.className='muted'; meta.textContent = (r.source ? r.source + ' ' : '') + (r.job_id ? 'job:'+r.job_id : ''); li.appendChild(meta);
-              } else {
-                li.textContent = JSON.stringify(r);
-              }
-              ul.appendChild(li);
-            });
-            result.appendChild(ul);
-
-            // pager
-            var pager = document.createElement('div'); pager.className='pager muted';
-            var current = json.page || page; var per = json.per_page || 25;
-            var prev = document.createElement('button'); prev.textContent='Prev'; prev.disabled = current <= 1;
-            var next = document.createElement('button'); next.textContent='Next';
-            prev.addEventListener('click', function(){ var p = Math.max(1, current-1); var ps = new URLSearchParams(window.location.search); ps.set('q', q); ps.set('page', p); window.location.search = ps.toString(); });
-            next.addEventListener('click', function(){ var p = current+1; var ps = new URLSearchParams(window.location.search); ps.set('q', q); ps.set('page', p); window.location.search = ps.toString(); });
-            pager.appendChild(prev); pager.appendChild(document.createTextNode(' Page '+current+' ')); pager.appendChild(next);
-            result.appendChild(pager);
-
-          }catch(err){ console.error(err); status.textContent = 'Search unavailable: ' + (err.message || err); }
-        }
-
-        var q = getQuery();
-        if(!q) document.getElementById('status').textContent = 'No query provided in the URL.';
-        else doSearch(q, getPage());
-      })();
-    </script>
-
+    function submitForm(){ var q = document.getElementById('q').value.trim(); if(q) doSearch(q,1); return false; }
+    window.addEventListener('DOMContentLoaded', function(){ var q = getQueryParam(); document.getElementById('q').value = q; if(q) doSearch(q,1); });
+  </script>
 </body>
 </html>

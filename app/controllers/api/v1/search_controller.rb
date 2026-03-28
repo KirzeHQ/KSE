@@ -27,7 +27,42 @@ class Api::V1::SearchController < Api::BaseController
       end
 
       blobs.each do |b|
-        results << { type: "blob", id: b.id, key: b.key, source: b.source, job_id: b.job_id, url: b.url, snippet: (b.text_index || "")[0..500] }
+        rec = {
+          type: "blob",
+          id: b.id,
+          key: b.key,
+          source: b.source,
+          job_id: b.job_id,
+          url: nil,
+          title: nil,
+          description: nil,
+          sitename: nil,
+          crawl_date: nil,
+          status_code: nil,
+          snippet: (b.text_index || "")[0..500]
+        }
+
+        if b.data.present?
+          begin
+            parsed = JSON.parse(b.data.force_encoding("UTF-8")) rescue nil
+            if parsed.is_a?(Hash)
+              rec[:url] = parsed["url"] || parsed["u"] || rec[:url]
+              rec[:title] = parsed["title"] || parsed["t"] || rec[:title]
+              rec[:description] = parsed["description"] || parsed["desc"] || rec[:description]
+              rec[:sitename] = parsed["sitename"] || parsed["site"] || rec[:sitename]
+              if parsed["crawl_date"]
+                cd = parsed["crawl_date"].to_i
+                cd = cd / 1000 if cd > 10_000_000_000
+                rec[:crawl_date] = Time.at(cd).utc.iso8601 rescue nil
+              end
+              rec[:status_code] = parsed["status_code"] if parsed.key?("status_code")
+            end
+          rescue StandardError
+          end
+        end
+
+        rec[:url] ||= b.url
+        results << rec
       end
     end
 
