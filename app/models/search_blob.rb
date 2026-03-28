@@ -26,7 +26,7 @@ class SearchBlob < ApplicationRecord
   pg_search_scope :full_text_search,
                   against: :text_index,
                   associated_against: {},
-                  using: { tsearch: { dictionary: "english", prefix: true, tsvector_column: 'text_search' } },
+                  using: { tsearch: { dictionary: "english", prefix: true, tsvector_column: "text_search" } },
                   ignoring: :accents
 
   validates :key, presence: true
