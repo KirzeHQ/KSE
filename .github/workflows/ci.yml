@@ -46,7 +46,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install Sys Depends
-        run: sudo apt-get update && sudo apt-get install -y libvips-dev libpq-dev libblas-dev liblapack-dev
+        run: sudo apt-get install -y libvips-dev libpq-dev libblas-dev liblapack-dev
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libblas-dev liblapack-dev
+        run: sudo apt-get install -y libblas-dev liblapack-dev
 
       - name: Install Postgres on runner (fallback to avoid Docker Hub pulls)
         run: |
