@@ -94,3 +94,11 @@ npx prettier --check "indexer/**.{js,jsx,css,scss,html}"
 ```bash
 docker compose -f docker-compose.prod.yml up -d --remove-orphans --build
 ```
+
+#### This stupid error:
+
+api-1  | A server is already running (pid: 1, file: /app/tmp/pids/server.pid).
+
+```bash
+docker compose -f docker-compose.prod.yml run api rm -f /app/tmp/pids/server.pid
+```
