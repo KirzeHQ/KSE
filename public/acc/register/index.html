@@ -45,49 +45,12 @@
 
   <div id="site-footer"></div>
   <script src="/js/site_layout.js"></script>
-
+  <script src="/js/auth.js"></script>
   <script>
-
-    function setSocialHrefs(){
-      try{
-        var apiBaseForSocial = document.querySelector('meta[name="api-base"]')?.content || '';
-        var baseHref = apiBaseForSocial ? apiBaseForSocial.replace(/\/$/, '') : '';
-        var ghHref = baseHref ? baseHref + '/api/v1/acc/oauth/github' : '/api/v1/acc/oauth/github';
-        var googleHref = baseHref ? baseHref + '/api/v1/acc/oauth/google' : '/api/v1/acc/oauth/google';
-        var hackHref = baseHref ? baseHref + '/api/v1/acc/oauth/hack_club' : '/api/v1/acc/oauth/hack_club';
-        var ghBtn = document.getElementById('github-login'); if(ghBtn) ghBtn.href = ghHref;
-        var gBtn = document.getElementById('google-login'); if(gBtn) gBtn.href = googleHref;
-        var hBtn = document.getElementById('hackclub-login'); if(hBtn) hBtn.href = hackHref;
-      }catch(e){}
-    }
-
-    if(document.querySelector('meta[name="api-base"]')?.content){ setSocialHrefs(); }
-    else if(window.KSE && window.KSE.fragmentsReady){ window.KSE.fragmentsReady.then(setSocialHrefs); }
-
-    var form = document.getElementById('register-form');
-    var msg = document.getElementById('message');
-
-    form.addEventListener('submit', async function(e){
-      e.preventDefault();
-      msg.textContent = '';
-      var name = document.getElementById('name').value.trim();
-      var email = document.getElementById('email').value.trim();
-      var password = document.getElementById('password').value;
-      if(!email || !password) { msg.textContent = 'Email and password are required'; return; }
-
-      var apiBase = document.querySelector('meta[name="api-base"]')?.content || '';
-      if(!apiBase && window.KSE && window.KSE.fragmentsReady){ await window.KSE.fragmentsReady; apiBase = document.querySelector('meta[name="api-base"]')?.content || ''; }
-      var url = apiBase ? apiBase.replace(/\/$/, '') + '/api/v1/acc/register' : '/api/v1/acc/register';
-
-      try{
-        var res = await fetch(url, { method: 'POST', mode: 'cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, email: email, password: password }) });
-        if(!res.ok) { var j = await res.json().catch(function(){return {error: 'Registration failed'}}); throw new Error((j && j.error) || 'Registration failed'); }
-        var json = await res.json();
-        try { localStorage.setItem('kse_secret', json.secret); } catch(e){}
-        msg.textContent = 'Registration successful — confirmation email sent.';
-        setTimeout(function(){ window.location.href = '/acc/dashboard/'; }, 900);
-      }catch(functionErr){ console.error(functionErr); msg.textContent = 'Registration error: ' + functionErr.message; }
-    });
+    (async function(){
+      try{ await window.KSE.auth.setupSocialHrefs(); }catch(e){}
+      window.KSE.auth.initRegister();
+    })();
   </script>
 </body>
 </html>

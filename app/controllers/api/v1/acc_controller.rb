@@ -12,7 +12,7 @@ class Api::V1::AccController < Api::BaseController
     end
 
     unless account.confirmed?
-      return render json: { error: "Email not confirmed" }, status: :forbidden
+      return render json: { error: "Email not confirmed", resend: true, resend_endpoint: "/api/v1/acc/resend_confirmation" }, status: :forbidden
     end
 
     account.ensure_api_token!
@@ -30,16 +30,18 @@ class Api::V1::AccController < Api::BaseController
     end
 
     account = Account.create!(email: email, password: password, name: (name.presence || email.split("@").first))
-    account.regenerate_api_token!
 
     if defined?(AccountsMailer)
       token = account.generate_confirmation_token!
       frontend = ENV.fetch("FRONTEND_URL", nil)
       confirm_url = frontend ? "#{frontend}/confirm?token=#{token}" : nil
       AccountsMailer.with(account: account, token: token, confirm_url: confirm_url).confirmation.deliver_later
-    end
 
-    render json: { secret: account.api_token, account: { id: account.id, email: account.email, name: account.name } }, status: :created
+      render json: { ok: true, message: "Account created. Please check your email to verify your account before logging in." }, status: :created
+    else
+      account.regenerate_api_token!
+      render json: { secret: account.api_token, account: { id: account.id, email: account.email, name: account.name } }, status: :created
+    end
   end
 
   # POST /api/v1/acc/resend_confirmation
