@@ -9,8 +9,12 @@ RUN apt-get update -qq && apt-get install -y \
 # Copy Gemfiles first
 COPY Gemfile Gemfile.lock ./
 
-# Install gems
-RUN bundle install
+# Install bundler
+RUN gem install bundler -v "$(grep -A 1 'BUNDLED WITH' Gemfile.lock | tail -n 1)"
+
+# 
+RUN bundle config set --local path 'vendor/bundle' \
+ && bundle install --jobs 4 --retry 3
 
 # Copy app code
 COPY . .
