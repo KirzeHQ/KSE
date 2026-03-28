@@ -16,12 +16,12 @@ class DbIndexManager
       table_ident = conn.quote_table_name(table)
       idx_ident = conn.quote_column_name(index_name)
 
-      # Add a stored tsvector column if missing, then populate it.
+      # Add a stored tsvector column if missing, then populate it using unaccent.
       unless conn.column_exists?(table, :text_search)
         Rails.logger.info "Adding tsvector column text_search to #{table}"
         conn.execute("ALTER TABLE #{table_ident} ADD COLUMN IF NOT EXISTS text_search tsvector;")
-        Rails.logger.info "Populating text_search column"
-        conn.execute("UPDATE #{table_ident} SET text_search = to_tsvector('english', coalesce(text_index, '') || ' ' || coalesce(key, ''))")
+        Rails.logger.info "Populating text_search column (using unaccent)"
+        conn.execute("UPDATE #{table_ident} SET text_search = to_tsvector('english', unaccent(coalesce(text_index, '')) || ' ' || unaccent(coalesce(key, '')))")
       end
 
       # Create a GIN index on the stored column
@@ -39,8 +39,19 @@ class DbIndexManager
 
       trigger_name = "search_blobs_text_search_update"
       unless trigger_exists?(conn, trigger_name, table)
-        Rails.logger.info "Creating tsvector update trigger on #{table}"
-        conn.execute("CREATE TRIGGER #{trigger_name} BEFORE INSERT OR UPDATE ON #{table_ident} FOR EACH ROW EXECUTE FUNCTION tsvector_update_trigger('text_search', 'pg_catalog.english', 'text_index', 'key');")
+        Rails.logger.info "Creating unaccent tsvector update trigger on #{table}"
+
+        # create or replace the helper trigger function
+        conn.execute(<<-SQL)
+          CREATE OR REPLACE FUNCTION search_blobs_update_text_search() RETURNS trigger AS $$
+          begin
+            new.text_search := to_tsvector('english', unaccent(coalesce(new.text_index, '')) || ' ' || unaccent(coalesce(new.key, '')));
+            return new;
+          end
+          $$ LANGUAGE plpgsql;
+        SQL
+
+        conn.execute("CREATE TRIGGER #{trigger_name} BEFORE INSERT OR UPDATE ON #{table_ident} FOR EACH ROW EXECUTE FUNCTION search_blobs_update_text_search();")
         Rails.logger.info "Created trigger #{trigger_name}"
       end
     rescue ActiveRecord::StatementInvalid => e
