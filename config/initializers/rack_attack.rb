@@ -29,8 +29,7 @@ class Rack::Attack
   end
 
   # Custom response for throttled requests (JSON)
-  self.throttled_response = lambda do |env|
-    now = Time.now.utc
+  self.throttled_responder = lambda do |env|
     match_data = env["rack.attack.match_data"] || {}
     retry_after = (match_data[:period] || 60)
 
