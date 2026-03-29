@@ -1,5 +1,10 @@
 # Default seeds for the indexer (one URL per line). Lines starting with # are ignored.
 # http://localhost:3000/
 # Add more seeds below, one per line, or set SEED_URLS="https://example.com,https://other/" in env.
+# New note: Lines starting with # just error out that line, not the file. If a url is invalid. it will continue with other urls. So you can have a mix of valid and invalid urls in the seeds file, and it will just skip the invalid ones.
+
 
 https://flavortown.hackclub.com/leaderboard
+https://flavortown.hackclub.com/explore
+https://flavortown.hackclub.com/explore/gallery
+https://flavortown.hackclub.com/projects/17360
