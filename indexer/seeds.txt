@@ -2,10 +2,4 @@
 # http://localhost:3000/
 # Add more seeds below, one per line, or set SEED_URLS="https://example.com,https://other/" in env.
 
-
-https://www.github.com/
-https://google.com/
-https://flavortown.hackclub.com/
-https://www.bbc.com/
-https://www.cnn.com/
-https://ospedia.site/
+https://flavortown.hackclub.com/leaderboard

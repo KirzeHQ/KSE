@@ -1,5 +1,10 @@
 # KSE
 
+## Overview
+
+KSE is a search engine built with Ruby on Rails.  
+It has an indexer that reads a seeds list and creates `SearchBlob` records with the text to be searched.  
+The search engine supports full-text search with PostgreSQL's `tsvector` and `tsquery`.  
 
 ## Optimizations
 

@@ -1,6 +1,9 @@
 import { parse } from "node-html-parser";
 import fs from "fs";
 import crypto from "crypto";
+import path from "path";
+import { fileURLToPath } from "url";
+import db from "./db.js";
 
 const API_BASE = process.env.API_BASE || "http://localhost:3000/api/v1";
 const API_KEY = process.env.API_KEY || "";
@@ -22,6 +25,8 @@ let submissionsCount = 0;
 let failedSubmissions = 0;
 let localJobIdCounter = 0;
 const startTime = Date.now();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "scraped.sqlite");
 
 const LOG_LINES = 5;
 const logs = [];
@@ -452,13 +457,26 @@ async function handleUrl(url) {
       outlinks: discovered,
     };
 
-    // enqueue newly seen links
+    // mark this URL as seen in the DB (best-effort)
+    try {
+      await db.mark(rec.url, { status_code: rec.status_code || 0, title: rec.title || "" });
+    } catch (e) {
+      addLog(`[WARN] db.mark failed for ${rec.url}: ${e && e.message ? e.message : e}`);
+    }
+
+    // enqueue newly seen links (skip DB-known URLs)
     let added = 0;
     for (const l of discovered) {
       if (!seenUrls.has(l)) {
-        seenUrls.add(l);
-        frontier.push(l);
-        added++;
+        const already = await db.has(l).catch(() => false);
+        if (!already) {
+          seenUrls.add(l);
+          frontier.push(l);
+          added++;
+        } else {
+          // mark in-memory as seen to avoid repeated DB checks
+          seenUrls.add(l);
+        }
       }
     }
 
@@ -545,6 +563,14 @@ async function mainLoop() {
       process.stdout.write("\x1b[?25l");
     } catch (e) {}
 
+    // initialize DB (best-effort)
+    try {
+      await db.open(DB_PATH);
+      addLog(`db opened at ${DB_PATH}`);
+    } catch (e) {
+      addLog(`[WARN] db open failed: ${e && e.message ? e.message : e}`);
+    }
+
     let seeds = [];
     if (process.env.SEEDS) {
       seeds = process.env.SEEDS.split(/\s*,\s*/)
@@ -568,8 +594,14 @@ async function mainLoop() {
 
     for (const s of seeds) {
       if (!seenUrls.has(s)) {
-        seenUrls.add(s);
-        frontier.push(s);
+        const already = await db.has(s).catch(() => false);
+        if (!already) {
+          seenUrls.add(s);
+          frontier.push(s);
+        } else {
+          addLog(`skipping seed (already indexed): ${s}`);
+          seenUrls.add(s);
+        }
       }
     }
 
@@ -613,6 +645,9 @@ process.on("SIGINT", async () => {
   } catch (e) {
     addLog(`[ERROR] ${e && e.message ? e.message : e}`);
   }
+  try {
+    await db.close();
+  } catch (e) {}
   drawUI();
   try {
     process.stdout.write("\x1b[?25h");
@@ -627,6 +662,9 @@ process.on("SIGTERM", async () => {
   } catch (e) {
     addLog(`[ERROR] ${e && e.message ? e.message : e}`);
   }
+  try {
+    await db.close();
+  } catch (e) {}
   drawUI();
   try {
     process.stdout.write("\x1b[?25h");
