@@ -76,16 +76,13 @@ Rails.application.configure do
   # Only use :id for inspections in production.
   config.active_record.attributes_for_inspect = [ :id ]
 
-  # Enable DNS rebinding protection and other `Host` header attacks.
-  if ENV["RAILS_ALLOWED_HOSTS"].present?
-    ENV["RAILS_ALLOWED_HOSTS"].split(",").map(&:strip).each do |host|
-      if host.start_with?("/") && host.end_with?("/")
-        config.hosts << Regexp.new(host[1..-2])
-      else
-        config.hosts << host
-      end
-    end
-  end
+  Rails.application.config.hosts = [
+    IPAddr.new("0.0.0.0/0"),        # All IPv4 addresses.
+    IPAddr.new("::/0"),             # All IPv6 addresses.
+    "localhost",                    # The localhost reserved domain.
+    ENV["RAILS_DEVELOPMENT_HOSTS"]  # Additional comma-separated hosts for development.
+  ]
+
   #
   # Skip DNS rebinding protection for the default health check endpoint.
   # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
