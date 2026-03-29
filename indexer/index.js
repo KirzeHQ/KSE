@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import db from "./db.js";
 
-const API_BASE = process.env.API_BASE || "http://kse.kirze.de/api/v1";
+const API_BASE = process.env.API_BASE || "https://kse.kirze.de/api/v1";
 const API_KEY = process.env.API_KEY || "";
 const POLL_INTERVAL = Number(process.env.POLL_INTERVAL_MS || 5000);
 const CONCURRENCY = Number(process.env.CONCURRENCY || 4);
@@ -166,6 +166,8 @@ async function fetchSitemap(origin) {
 const ROBOTS_AGENT = "ksebot";
 const robotsCache = new Map();
 const lastAccess = new Map();
+const domainBlocked = new Map();
+const RATE_LIMIT_BLOCK_MS = Number(process.env.RATE_LIMIT_BLOCK_MS || 5 * 60 * 1000);
 
 function normalizeLine(line) {
   const idx = line.indexOf("#");
@@ -414,7 +416,19 @@ async function handleUrl(url) {
       method: "GET",
       headers: { "User-Agent": "kse-indexer/1.0" },
     });
-    if (!res.ok) throw new Error(`fetch ${url} failed: ${res.status}`);
+    if (!res.ok) {
+      if (res.status === 429) {
+        try {
+          const origin = new URL(url).origin;
+          domainBlocked.set(origin, Date.now() + RATE_LIMIT_BLOCK_MS);
+          addLog(`received 429 from ${origin}; blocking for ${Math.round(RATE_LIMIT_BLOCK_MS / 1000)}s`);
+        } catch (e) {}
+        // treat as visited for now and return so workers pick other items
+        visitedCount++;
+        return;
+      }
+      throw new Error(`fetch ${url} failed: ${res.status}`);
+    }
     const html = await res.text();
     const links = extractLinks(html, url);
 
@@ -507,6 +521,22 @@ async function workerLoop(workerId) {
         await sleep(POLL_INTERVAL);
         continue;
       }
+
+      let origin = null;
+      try {
+        origin = new URL(url).origin;
+      } catch (e) {}
+      if (origin) {
+        const blockedUntil = domainBlocked.get(origin) || 0;
+        if (blockedUntil > Date.now()) {
+          frontier.push(url);
+          await sleep(200);
+          continue;
+        } else if (blockedUntil && blockedUntil <= Date.now()) {
+          domainBlocked.delete(origin);
+        }
+      }
+
       await handleUrl(url);
     } catch (err) {
       addLog(
@@ -524,7 +554,8 @@ function drawUI() {
     submissionsCount /
     Math.max(1, Math.floor((Date.now() - startTime) / 60000));
   const waitingToFlush = discoveredLinksBuffer.length;
-  const stats = `Uptime:${uptime}s Visited:${visitedCount} Seen:${seenUrls.size} Frontier:${frontier.length} Buffer:${discoveredLinksCount} Waiting:${waitingToFlush} Subs:${submissionsCount} Fail:${failedSubmissions} Rate:${Math.round(rate)}/min Recorded:${recordedCount}`;
+  const blockedCount = Array.from(domainBlocked.values()).filter((t) => t > Date.now()).length;
+  const stats = `Uptime:${uptime}s Visited:${visitedCount} Seen:${seenUrls.size} Blocked:${blockedCount} Frontier:${frontier.length} Buffer:${discoveredLinksCount} Waiting:${waitingToFlush} Subs:${submissionsCount} Fail:${failedSubmissions} Rate:${Math.round(rate)}/min Recorded:${recordedCount}`;
 
   const sep = "=".repeat(Math.min(cols, 80));
 
