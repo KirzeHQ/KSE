@@ -18,18 +18,6 @@ window.KSE = window.KSE || {};
     return { status: res.status, ok: res.ok, data: data };
   }
 
-  async function setupSocialHrefs(){
-    try{
-      var base = await getApiBase();
-      var ghHref = base ? base + '/api/v1/acc/oauth/github' : '/api/v1/acc/oauth/github';
-      var googleHref = base ? base + '/api/v1/acc/oauth/google' : '/api/v1/acc/oauth/google';
-      var hackHref = base ? base + '/api/v1/acc/oauth/hack_club' : '/api/v1/acc/oauth/hack_club';
-      var ghBtn = document.getElementById('github-login'); if(ghBtn) ghBtn.href = ghHref;
-      var gBtn = document.getElementById('google-login'); if(gBtn) gBtn.href = googleHref;
-      var hBtn = document.getElementById('hackclub-login'); if(hBtn) hBtn.href = hackHref;
-    }catch(e){}
-  }
-
   function showMessage(elem, text, isHtml){
     if(!elem) return;
     if(isHtml) elem.innerHTML = text;
@@ -125,5 +113,5 @@ window.KSE = window.KSE || {};
     });
   }
 
-  window.KSE.auth = { id: id, getApiBase: getApiBase, postJson: postJson, setupSocialHrefs: setupSocialHrefs, initLogin: initLogin, initRegister: initRegister, showMessage: showMessage };
+  window.KSE.auth = { id: id, getApiBase: getApiBase, postJson: postJson, initLogin: initLogin, initRegister: initRegister, showMessage: showMessage };
 })();
