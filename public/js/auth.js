@@ -33,7 +33,11 @@ window.KSE = window.KSE || {};
     var form = document.getElementById(opts.formId || 'login-form');
     var msg = document.getElementById(opts.messageId || 'message');
     if(!form) return;
-    setupSocialHrefs().catch(()=>{});
+    try {
+      if (window.KSE && window.KSE.auth && typeof window.KSE.auth.setupSocialHrefs === 'function') {
+        await window.KSE.auth.setupSocialHrefs();
+      }
+    } catch(e){}
 
     form.addEventListener('submit', async function(e){
       e.preventDefault();
@@ -83,7 +87,11 @@ window.KSE = window.KSE || {};
     var form = document.getElementById(opts.formId || 'register-form');
     var msg = document.getElementById(opts.messageId || 'message');
     if(!form) return;
-    setupSocialHrefs().catch(()=>{});
+    try {
+      if (window.KSE && window.KSE.auth && typeof window.KSE.auth.setupSocialHrefs === 'function') {
+        await window.KSE.auth.setupSocialHrefs();
+      }
+    } catch(e){}
 
     form.addEventListener('submit', async function(e){
       e.preventDefault();
