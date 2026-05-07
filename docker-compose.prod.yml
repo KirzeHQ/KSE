@@ -1,6 +1,6 @@
 services:
   api:
-    build: .
+    image: ghcr.io/${REGISTRY_OWNER}/${REGISTRY_REPO}:${IMAGE_TAG:-latest}
     env_file: .env
     command: bundle exec rails s -b 0.0.0.0 -p 3000
     ports:
